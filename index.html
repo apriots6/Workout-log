@@ -141,6 +141,18 @@
   .recpct{font-family:var(--mono);font-weight:700;width:78px;text-align:right;white-space:nowrap}
   .recago{font-family:var(--mono);font-size:12px;width:54px;text-align:right;white-space:nowrap}
 
+  /* exercise picker */
+  .catrow{display:flex;gap:6px;overflow-x:auto;padding:2px 0 12px;-webkit-overflow-scrolling:touch}
+  .catrow::-webkit-scrollbar{display:none}
+  .catchip{flex:none;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 15px;font:inherit;font-size:14px;font-weight:600;color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+  .catchip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .exlistbox{max-height:52vh;overflow:auto;margin:0 -4px;-webkit-overflow-scrolling:touch}
+  .exrow{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line-soft);padding:15px 6px;font:inherit;cursor:pointer;color:var(--ink)}
+  .exrow:active{background:var(--line-soft)}
+  .exrow .exn{font-weight:600;font-size:16px}
+  .exrow .exbp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);flex:none}
+  .exrow.addnew .exn{color:var(--accent-ink)}
+
   /* report bars */
   .barrow{display:flex;align-items:center;gap:10px;margin-bottom:11px}
   .barrow .nm{width:52px;font-size:13px;font-weight:600;flex:none}
@@ -404,14 +416,9 @@
 
     var add=el("div",{class:"card"},
       '<div class="sectitle">종목 추가</div>'+
-      '<div class="addrow"><input id="exName" list="exlist" placeholder="종목명 (예: 벤치프레스)" autocomplete="off">'+
-      '<select id="exBP"></select></div>'+
-      '<button class="btn primary block" id="addExBtn" style="margin-top:8px">＋ 종목 추가</button>');
+      '<button class="btn primary block" id="openPicker">＋ 종목 선택</button>');
     v.appendChild(add);
-    var bp=$("#exBP",add);BODY_PARTS.concat(["기타"]).forEach(function(p){bp.appendChild(el("option",{value:p},p));});
-    $("#exName",add).oninput=function(){var b=bodyPartFor(this.value.trim());if(b&&b!=="기타")bp.value=b;};
-    $("#exName",add).addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();$("#addExBtn",add).click();}});
-    $("#addExBtn",add).onclick=function(){var n=$("#exName",add).value;if(!n.trim()){toast("종목명을 입력하세요");return;}addEntry(n,bp.value);};
+    $("#openPicker",add).onclick=function(){openExercisePicker(function(name,bp){closeSheet();addEntry(name,bp);});};
 
     var actions=el("div",{class:"btn-row"},
       '<button class="btn ghost" id="saveRoutineBtn">루틴으로 저장</button>'+
@@ -846,25 +853,58 @@
   }
   function commonBodyPart(items){var c={};items.forEach(function(i){c[i.bodyPart]=(c[i.bodyPart]||0)+1;});var best="",n=0;for(var k in c)if(c[k]>n){n=c[k];best=k;}return best;}
 
+  // 종목 선택 시트: 카테고리 탭 + 목록 탭 선택 + 검색/직접추가.  onPick(name,bodyPart) 콜백.
+  var PICK_CATS=["전체","가슴","등","하체","어깨","팔","코어","유산소"];
+  var pickerCat="전체";
+  function openExercisePicker(onPick,onCancel){
+    pickerCat="전체";
+    openSheet(
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">종목 선택</h3>'+
+      '<button class="btn sm ghost" id="pkClose">닫기</button></div>'+
+      '<input id="pkSearch" placeholder="검색하거나 새 종목 입력" autocomplete="off" style="margin-bottom:12px">'+
+      '<div class="catrow" id="pkCats"></div>'+
+      '<div class="exlistbox" id="pkList"></div>');
+    $("#pkClose").onclick=function(){if(onCancel)onCancel();else closeSheet();};
+    function catalog(){var m={};Object.keys(SEED_EX).forEach(function(n){m[n]=SEED_EX[n];});exercises.forEach(function(e){if(e.name)m[e.name]=e.bodyPart||m[e.name]||"기타";});return m;}
+    function paintCats(){var r=$("#pkCats");r.innerHTML=PICK_CATS.map(function(ct){return '<button class="catchip'+(ct===pickerCat?" on":"")+'" data-c="'+ct+'">'+ct+'</button>';}).join("");
+      $$(r,".catchip").forEach(function(b){b.onclick=function(){pickerCat=b.getAttribute("data-c");paintCats();paintList();};});}
+    function paintList(){
+      var box=$("#pkList"),q=($("#pkSearch").value||"").trim(),map=catalog();
+      var names=Object.keys(map).filter(function(n){return (pickerCat==="전체"||map[n]===pickerCat)&&(!q||n.indexOf(q)>-1);}).sort(function(a,b){return a.localeCompare(b,"ko");});
+      var html="";
+      if(q&&names.indexOf(q)===-1){var nbp=(pickerCat!=="전체"?pickerCat:bodyPartFor(q));
+        html+='<button class="exrow addnew" data-new="'+esc(q)+'" data-bp="'+esc(nbp)+'"><span class="exn">＋ "'+esc(q)+'" 직접 추가</span><span class="exbp">'+esc(nbp)+'</span></button>';}
+      html+=names.map(function(n){return '<button class="exrow" data-n="'+esc(n)+'" data-bp="'+esc(map[n])+'"><span class="exn">'+esc(n)+'</span><span class="exbp">'+esc(map[n])+'</span></button>';}).join("");
+      if(!html)html='<div class="faint" style="padding:18px;text-align:center;font-size:13px">종목이 없어요. 위 칸에 이름을 입력해 추가하세요.</div>';
+      box.innerHTML=html;
+      $$(box,".exrow").forEach(function(b){b.onclick=function(){var nm=b.getAttribute("data-new")||b.getAttribute("data-n");var bp=b.getAttribute("data-bp")||bodyPartFor(nm);onPick(nm,bp);};});
+    }
+    $("#pkSearch").addEventListener("input",paintList);
+    paintCats();paintList();
+  }
+
   function openRoutineEditor(r){
     var editing=!!r;var draft=r?JSON.parse(JSON.stringify(r)):{id:uid("r"),name:"",bodyPart:"",items:[]};
-    openSheet('<h3>'+(editing?"루틴 편집":"새 루틴")+'</h3><p class="sub">종목을 추가해 구성하세요</p>'+
-      '<label class="fl">루틴 이름</label><input id="reName" placeholder="예: 등의 날" value="'+esc(draft.name)+'" style="margin-bottom:14px">'+
-      '<div id="reItems"></div>'+
-      '<div class="addrow" style="margin-top:6px"><input id="reEx" list="exlist" placeholder="종목 추가" autocomplete="off"><button class="btn primary" id="reAdd">추가</button></div>'+
-      '<button class="btn good block" id="reSave" style="margin-top:16px">저장</button>');
-    function paint(){var box=$("#reItems");box.innerHTML="";
-      draft.items.forEach(function(it,i){var row=el("div",{style:"display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line-soft)"},
-        '<span><b>'+esc(it.exercise)+'</b> <span class="faint">'+esc(it.bodyPart)+'</span></span><button class="rmset" data-i="'+i+'" style="border:none;background:none;font-size:16px;color:var(--ink-faint);cursor:pointer">✕</button>');
+    function paint(){var box=$("#reItems");if(!box)return;box.innerHTML="";
+      draft.items.forEach(function(it,i){var row=el("div",{style:"display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line-soft)"},
+        '<span><b>'+esc(it.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(it.bodyPart)+'</span></span><button class="rmset" data-i="'+i+'" style="border:none;background:none;font-size:16px;color:var(--ink-faint);cursor:pointer">✕</button>');
         row.querySelector("button").onclick=function(){draft.items.splice(i,1);paint();};box.appendChild(row);});
-      if(!draft.items.length)box.innerHTML='<div class="faint" style="font-size:13px;padding:6px 0">종목을 추가하세요</div>';}
-    paint();
-    $("#reAdd").onclick=function(){var n=$("#reEx").value.trim();if(!n)return;draft.items.push({exercise:n,bodyPart:bodyPartFor(n),targetSets:3,targetReps:""});ensureEx(n);$("#reEx").value="";updateExDatalist();paint();};
-    $("#reEx").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();$("#reAdd").click();}});
-    $("#reSave").onclick=function(){draft.name=$("#reName").value.trim();if(!draft.name){toast("이름을 입력하세요");return;}if(!draft.items.length){toast("종목을 추가하세요");return;}
-      draft.bodyPart=commonBodyPart(draft.items);
-      if(editing){for(var i=0;i<routines.length;i++)if(routines[i].id===draft.id)routines[i]=draft;}else routines.push(draft);
-      save(K.routines,routines);closeSheet();renderRoutines();toast("저장됨");};
+      if(!draft.items.length)box.innerHTML='<div class="faint" style="font-size:13px;padding:6px 0">아래 버튼으로 종목을 추가하세요</div>';}
+    function render(){
+      openSheet('<h3>'+(editing?"루틴 편집":"새 루틴")+'</h3><p class="sub">종목을 추가해 구성하세요</p>'+
+        '<label class="fl">루틴 이름</label><input id="reName" placeholder="예: 등의 날" value="'+esc(draft.name)+'" style="margin-bottom:14px">'+
+        '<div id="reItems"></div>'+
+        '<button class="btn ghost block" id="reAddOpen" style="margin-top:8px">＋ 종목 추가</button>'+
+        '<button class="btn good block" id="reSave" style="margin-top:12px">저장</button>');
+      paint();
+      $("#reAddOpen").onclick=function(){draft.name=$("#reName").value;
+        openExercisePicker(function(name,bp){draft.items.push({exercise:name,bodyPart:bp,targetSets:3,targetReps:""});ensureEx(name,bp);render();},render);};
+      $("#reSave").onclick=function(){draft.name=$("#reName").value.trim();if(!draft.name){toast("이름을 입력하세요");return;}if(!draft.items.length){toast("종목을 추가하세요");return;}
+        draft.bodyPart=commonBodyPart(draft.items);
+        if(editing){for(var i=0;i<routines.length;i++)if(routines[i].id===draft.id)routines[i]=draft;}else routines.push(draft);
+        save(K.routines,routines);closeSheet();renderRoutines();toast("저장됨");};
+    }
+    render();
   }
 
 /* ============================================================
