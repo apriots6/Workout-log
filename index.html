@@ -156,9 +156,23 @@
   .exrow .exbp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);flex:none}
   .exrow.addnew .exn{color:var(--accent-ink)}
 
+  /* drag-to-reorder */
+  .drag-handle{flex:none;cursor:grab;color:var(--ink-faint);font-size:17px;line-height:1;padding:8px 5px;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  .rpe-note{font-size:11px;color:var(--ink-faint);margin:4px 0 2px;text-align:right}
+  .drag-handle:active{cursor:grabbing}
+  .dragging{opacity:.92;background:var(--accent-soft)!important;box-shadow:0 8px 24px rgba(20,25,35,.2);border-radius:12px;position:relative;z-index:5}
+  body.dragging-active,body.dragging-active *{-webkit-user-select:none!important;user-select:none!important}
+  body.dragging-active *{cursor:grabbing!important}
+
   /* routine item rows */
-  .reitem{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 2px;border-bottom:1px solid var(--line-soft)}
-  .reitem .reRm{border:none;background:none;font-size:16px;color:var(--ink-faint);cursor:pointer;padding:4px 6px}
+  .reitem{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line-soft)}
+  .reitem-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reitem-actions{display:flex;gap:4px;align-items:center;flex:none}
+  .rebtn{border:1px solid var(--line);background:var(--card);border-radius:8px;height:32px;min-width:32px;display:inline-grid;place-items:center;font-size:15px;color:var(--ink-soft);cursor:pointer;padding:0;font-family:inherit}
+  .rebtn:active{transform:scale(.94)}
+  .rebtn.dim{opacity:.28;pointer-events:none}
+  .rebtn.edit{padding:0 9px;font-size:13px;font-weight:600}
+  .rebtn.rm{border-color:transparent;background:none;color:var(--danger);font-size:16px}
   .reitem-edit{padding:14px;border:1px solid var(--accent);border-radius:12px;background:var(--accent-soft);margin:10px 0}
   .reitem-edit .fl{margin-bottom:4px}
 
@@ -394,6 +408,77 @@
   }
   function persistActive(){save(K.active,active);}
 
+  // 드래그 정렬 (라이브러리 없이 Pointer Events). listEl 안의 [data-row][data-idx] 행을
+  // [data-drag-handle] 를 길게 눌러(롱프레스) 끌어 재배치. 드롭 시 setArr(재배열된 배열) 호출.
+  var LONGPRESS_MS=320, DRAG_CANCEL_PX=10;
+  function enableDragSort(listEl,getArr,setArr){
+    $$(listEl,"[data-drag-handle]").forEach(function(handle){
+      handle.style.touchAction="none";
+      handle.addEventListener("pointerdown",function(e){
+        var row=e.target.closest("[data-row]");if(!row)return;
+        e.preventDefault();
+        var sx=e.clientX,sy=e.clientY,active=false,grabDy=0,tY=0;
+        function activate(){
+          active=true;grabDy=sy-row.getBoundingClientRect().top;tY=0;
+          row.classList.add("dragging");document.body.classList.add("dragging-active");
+          row.style.transition="none";row.style.willChange="transform";
+          if(navigator.vibrate){try{navigator.vibrate(12);}catch(_){}}
+          follow(sy);
+        }
+        // 터치는 길게 눌러 시작(스크롤과 구분), 마우스·펜은 바로 드래그 시작
+        var hold=(e.pointerType==="touch")?setTimeout(activate,LONGPRESS_MS):(activate(),null);
+        function follow(y){  // 잡은 행이 커서를 따라 떠서 움직이도록
+          var naturalTop=row.getBoundingClientRect().top-tY;
+          tY=(y-grabDy)-naturalTop;
+          row.style.transform="translateY("+tY+"px)";
+        }
+        function reorder(y){  // 커서가 다른 행의 중앙을 넘으면 그 자리로 재배치(FLIP 애니메이션)
+          var sibs=$$(listEl,"[data-row]").filter(function(c){return c!==row;}),ref=null;
+          for(var i=0;i<sibs.length;i++){var rc=sibs[i].getBoundingClientRect();if(y<rc.top+rc.height/2){ref=sibs[i];break;}}
+          var move2=ref?(ref.previousElementSibling!==row):(listEl.lastElementChild!==row);
+          if(!move2)return;
+          var firsts=sibs.map(function(c){return {el:c,top:c.getBoundingClientRect().top};});
+          if(ref)listEl.insertBefore(row,ref);else listEl.appendChild(row);
+          firsts.forEach(function(f){var d=f.top-f.el.getBoundingClientRect().top;if(!d)return;
+            f.el.style.transition="none";f.el.style.transform="translateY("+d+"px)";
+            f.el.getBoundingClientRect();  // 리플로우 강제
+            f.el.style.transition="transform .18s ease";f.el.style.transform="";});
+        }
+        function move(ev){
+          if(!active){  // 홀드 전에 움직이면(스크롤/탭) 취소
+            if(Math.abs(ev.clientX-sx)>DRAG_CANCEL_PX||Math.abs(ev.clientY-sy)>DRAG_CANCEL_PX){clearTimeout(hold);endDrag();}
+            return;
+          }
+          ev.preventDefault();reorder(ev.clientY);follow(ev.clientY);
+        }
+        function up(){
+          clearTimeout(hold);
+          document.removeEventListener("pointermove",move,true);document.removeEventListener("pointerup",up,true);document.removeEventListener("pointercancel",up,true);
+          if(!active){clearStyles();return;}
+          var order=$$(listEl,"[data-row]").map(function(c){return +c.getAttribute("data-idx");});
+          var changed=order.some(function(v,i){return v!==i;});
+          if(!changed&&Math.abs(tY)<2){clearStyles();return;}
+          // 놓으면 제자리로 스르륵 안착
+          row.style.transition="transform .17s cubic-bezier(.2,.7,.3,1)";row.style.transform="translateY(0px)";
+          var done=false;
+          function fin(){if(done)return;done=true;row.removeEventListener("transitionend",fin);clearStyles();
+            if(changed){var arr=getArr();setArr(order.map(function(idx){return arr[idx];}));}}
+          row.addEventListener("transitionend",fin);setTimeout(fin,220);
+        }
+        function endDrag(){  // 활성화 전 취소
+          document.removeEventListener("pointermove",move,true);document.removeEventListener("pointerup",up,true);document.removeEventListener("pointercancel",up,true);
+          clearStyles();
+        }
+        function clearStyles(){
+          row.classList.remove("dragging");document.body.classList.remove("dragging-active");
+          row.style.transition="";row.style.transform="";row.style.willChange="";
+        }
+        // document 레벨에서 받아야 행이 DOM에서 이동해도 이벤트가 끊기지 않음(캡처 이탈 방지)
+        document.addEventListener("pointermove",move,true);document.addEventListener("pointerup",up,true);document.addEventListener("pointercancel",up,true);
+      });
+    });
+  }
+
 /* ============================================================
    렌더: 오늘
    ============================================================ */
@@ -421,7 +506,10 @@
       '<div><div class="lab" style="text-align:right">총 볼륨</div><div class="vol" id="liveVol">0 '+settings.unit+'</div></div></div>');
     v.appendChild(hero);
 
-    active.entries.forEach(function(en,ei){v.appendChild(renderEntry(en,ei));});
+    var entryList=el("div",{id:"entryList"});
+    active.entries.forEach(function(en,ei){entryList.appendChild(renderEntry(en,ei));});
+    v.appendChild(entryList);
+    enableDragSort(entryList,function(){return active.entries;},function(a){active.entries=a;persistActive();renderToday();});
 
     var add=el("div",{class:"card"},
       '<div class="sectitle">종목 추가</div>'+
@@ -442,11 +530,13 @@
   }
 
   function renderEntry(en,ei){
-    var wrap=el("div",{class:"entry"});
+    var wrap=el("div",{class:"entry","data-row":"1","data-idx":String(ei)});
     var last=lastRecord(en.exercise);
     var lastHTML=last?'<div class="lastrec">지난 기록: '+fmt(last.set.weight)+last.unit+' × '+last.set.reps+' · '+daysAgoLabel(last.date)+'</div>':'<div class="lastrec faint">첫 기록입니다</div>';
     wrap.innerHTML=
-      '<div class="entry-head"><div><div class="nm">'+esc(en.exercise)+'</div><div class="bp">'+esc(en.bodyPart)+'</div></div>'+
+      '<div class="entry-head"><div style="display:flex;align-items:center;gap:8px;min-width:0">'+
+        '<span class="drag-handle" data-drag-handle title="길게 눌러 순서 변경">⠿</span>'+
+        '<div style="min-width:0"><div class="nm">'+esc(en.exercise)+'</div><div class="bp">'+esc(en.bodyPart)+'</div></div></div>'+
       '<div style="display:flex;align-items:center;gap:8px">'+
         '<div class="unit-mini" title="이 종목의 무게 단위">'+
           '<button data-act="setUnit" data-ei="'+ei+'" data-u="kg" class="'+(en.unit==="kg"?"on":"")+'">kg</button>'+
@@ -466,6 +556,7 @@
         '<button class="rmset" data-act="rmSet" data-ei="'+ei+'" data-si="'+si+'" title="세트 삭제">✕</button>';
       wrap.appendChild(g);
     });
+    wrap.appendChild(el("div",{class:"rpe-note"},"RPE = 10 − 더 할 수 있는 횟수 · 비워도 됨"));
     var rec=recForEntry(en);
     if(rec)wrap.appendChild(el("div",{class:"rec"+(rec.pr?" pr":"")},rec.html));
     wrap.appendChild(el("button",{class:"btn sm ghost",style:"margin-top:10px","data-act":"addSet","data-ei":String(ei)},"＋ 세트 추가"));
@@ -879,14 +970,14 @@
   // 종목 선택 시트: 카테고리 탭 + 목록 탭 선택 + 검색/직접추가.  onPick(name,bodyPart) 콜백.
   var PICK_CATS=["전체","가슴","등","하체","어깨","팔","코어","유산소"];
   var pickerCat="전체";
-  function openExercisePicker(onPick,onCancel){
+  function openExercisePicker(onPick,onCancel,locked){
     pickerCat="전체";
     openSheet(
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">종목 선택</h3>'+
       '<button class="btn sm ghost" id="pkClose">닫기</button></div>'+
       '<input id="pkSearch" placeholder="검색하거나 새 종목 입력" autocomplete="off" style="margin-bottom:12px">'+
       '<div class="catrow" id="pkCats"></div>'+
-      '<div class="exlistbox" id="pkList"></div>');
+      '<div class="exlistbox" id="pkList"></div>', locked);
     $("#pkClose").onclick=function(){if(onCancel)onCancel();else closeSheet();};
     function catalog(){var m={};Object.keys(SEED_EX).forEach(function(n){m[n]=SEED_EX[n];});exercises.forEach(function(e){if(e.name)m[e.name]=e.bodyPart||m[e.name]||"기타";});return m;}
     function paintCats(){var r=$("#pkCats");r.innerHTML=PICK_CATS.map(function(ct){return '<button class="catchip'+(ct===pickerCat?" on":"")+'" data-c="'+ct+'">'+ct+'</button>';}).join("");
@@ -913,7 +1004,7 @@
       if(!draft.items.length){box.innerHTML='<div class="faint" style="font-size:13px;padding:6px 0">아래 버튼으로 종목을 추가하세요</div>';return;}
       draft.items.forEach(function(it,i){
         if(i===editIdx){
-          var f=el("div",{class:"reitem-edit"});
+          var f=el("div",{class:"reitem-edit","data-row":"1","data-idx":String(i)});
           f.innerHTML='<label class="fl">운동 이름</label><input class="reEditName" value="'+esc(it.exercise)+'" placeholder="운동 이름" style="margin-bottom:10px">'+
             '<label class="fl">부위</label><select class="reEditBp" style="margin-bottom:12px"></select>'+
             '<div class="btn-row"><button class="btn sm ghost reEditCancel">취소</button><button class="btn sm primary reEditSave">확인</button></div>';
@@ -924,23 +1015,31 @@
             it.exercise=nm;it.bodyPart=sel.value;ensureEx(nm,sel.value);editIdx=-1;paint();};
           box.appendChild(f);
         }else{
-          var row=el("div",{class:"reitem"},
-            '<span><b>'+esc(it.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(it.bodyPart)+'</span></span>'+
-            '<span style="display:flex;gap:4px;align-items:center"><button class="btn sm ghost reEdit">편집</button><button class="rmset reRm">✕</button></span>');
+          var row=el("div",{class:"reitem","data-row":"1","data-idx":String(i)},
+            '<span class="drag-handle" data-drag-handle title="길게 눌러 순서 변경">⠿</span>'+
+            '<span class="reitem-name"><b>'+esc(it.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(it.bodyPart)+'</span></span>'+
+            '<span class="reitem-actions">'+
+              '<button class="rebtn edit reEdit">편집</button>'+
+              '<button class="rebtn rm reRm">✕</button>'+
+            '</span>');
           row.querySelector(".reEdit").onclick=function(){editIdx=i;paint();};
           row.querySelector(".reRm").onclick=function(){draft.items.splice(i,1);editIdx=-1;paint();};
           box.appendChild(row);
         }
-      });}
+      });
+      enableDragSort(box,function(){return draft.items;},function(a){draft.items=a;editIdx=-1;paint();});}
+    function tryClose(){if(draft.items.length||($("#reName")&&$("#reName").value.trim())){if(!confirm("만들던 루틴을 취소할까요? 저장하지 않은 내용은 사라집니다."))return;}closeSheet();}
     function render(){
-      openSheet('<h3>'+(editing?"루틴 편집":"새 루틴")+'</h3><p class="sub">종목을 추가해 구성하세요</p>'+
+      openSheet('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><h3 style="margin:0">'+(editing?"루틴 편집":"새 루틴")+'</h3>'+
+        '<button class="btn sm ghost" id="reClose">취소</button></div><p class="sub">종목 추가 · ⠿ 길게 눌러 순서 변경</p>'+
         '<label class="fl">루틴 이름</label><input id="reName" placeholder="예: 등의 날" value="'+esc(draft.name)+'" style="margin-bottom:14px">'+
         '<div id="reItems"></div>'+
         '<button class="btn ghost block" id="reAddOpen" style="margin-top:8px">＋ 종목 추가</button>'+
-        '<button class="btn good block" id="reSave" style="margin-top:12px">저장</button>');
+        '<button class="btn good block" id="reSave" style="margin-top:12px">저장</button>', true);
       paint();
+      $("#reClose").onclick=tryClose;
       $("#reAddOpen").onclick=function(){draft.name=$("#reName").value;
-        openExercisePicker(function(name,bp){draft.items.push({exercise:name,bodyPart:bp,targetSets:3,targetReps:""});ensureEx(name,bp);render();},render);};
+        openExercisePicker(function(name,bp){draft.items.push({exercise:name,bodyPart:bp,targetSets:3,targetReps:""});ensureEx(name,bp);render();},render,true);};
       $("#reSave").onclick=function(){draft.name=$("#reName").value.trim();if(!draft.name){toast("이름을 입력하세요");return;}if(!draft.items.length){toast("종목을 추가하세요");return;}
         draft.bodyPart=commonBodyPart(draft.items);
         if(editing){for(var i=0;i<routines.length;i++)if(routines[i].id===draft.id)routines[i]=draft;}else routines.push(draft);
@@ -1087,9 +1186,10 @@
 /* ============================================================
    시트/모달
    ============================================================ */
-  function openSheet(html){var s=$("#sheet");s.innerHTML=html;$("#scrim").classList.add("open");}
-  function closeSheet(){$("#scrim").classList.remove("open");}
-  $("#scrim").addEventListener("click",function(e){if(e.target===this)closeSheet();});
+  var sheetLocked=false;  // true면 바깥 터치로 안 닫힘(루틴 편집 등 데이터 유실 방지)
+  function openSheet(html,locked){var s=$("#sheet");s.innerHTML=html;sheetLocked=!!locked;$("#scrim").classList.add("open");}
+  function closeSheet(){sheetLocked=false;$("#scrim").classList.remove("open");}
+  $("#scrim").addEventListener("click",function(e){if(e.target===this&&!sheetLocked)closeSheet();});
 
   function openMenu(){
     openSheet('<h3>메뉴</h3><p class="sub">설정 · 데이터 백업 · 정보</p>'+
