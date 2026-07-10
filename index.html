@@ -120,11 +120,12 @@
   .hvol{font-size:18px;margin:2px 0}
   .hmemo{font-size:13px;color:var(--ink-soft);background:var(--line-soft);border-radius:8px;padding:7px 10px;margin-bottom:8px}
   .hsets2{display:flex;flex-direction:column;gap:1px}
-  .hset-row{display:grid;grid-template-columns:26px 1fr 1fr auto;align-items:center;gap:8px;padding:8px 4px;border-top:1px solid var(--line-soft);font-family:var(--mono)}
+  .hset-row{display:grid;grid-template-columns:24px 1fr 1fr 52px;align-items:center;gap:6px;padding:8px 4px;border-top:1px solid var(--line-soft);font-family:var(--mono)}
   .hset-row .hset-i{color:var(--ink-faint);font-size:12px}
-  .hset-row .hset-w,.hset-row .hset-r{font-weight:700;font-size:15px}
-  .hset-row .u{font-weight:400;font-size:12px;color:var(--ink-faint)}
-  .hset-row .hset-rpe{font-size:11px;color:var(--ink-faint);font-family:inherit}
+  .hcell{display:flex;align-items:baseline;gap:5px;min-width:0}
+  .hcell .hn{min-width:2.6em;font-size:15px;font-weight:700}
+  .hcell .u{font-size:12px;color:var(--ink-faint);font-weight:400}
+  .hset-rpe{text-align:right;font-size:11px;color:var(--ink-faint);white-space:nowrap}
   .setgrid{display:grid;grid-template-columns:44px 1fr 12px 1fr 1fr 26px;gap:6px;align-items:center;margin-bottom:6px;border-radius:8px}
   .setgrid.done{background:var(--good-soft)}
   .setgrid .idx{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
@@ -962,9 +963,9 @@
       return '<div class="hlist">'+hist.map(function(h){
         var vol=volE(h.en),e1=e1e(h.en),inten=e1>0?Math.round(maxW(h.en)/e1*100):0;
         var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(i+1)+'</span>'+
-          '<span class="hset-w">'+fmt(st.weight)+' <span class="u">'+esc(h.en.unit)+'</span></span>'+
-          '<span class="hset-r">'+st.reps+' <span class="u">회</span></span>'+
-          (st.rpe!=null?'<span class="hset-rpe">RPE '+st.rpe+'</span>':'<span></span>')+'</div>';}).join('');
+          '<span class="hcell"><b class="hn">'+fmt(st.weight)+'</b><span class="u">'+esc(h.en.unit)+'</span></span>'+
+          '<span class="hcell"><b class="hn">'+st.reps+'</b><span class="u">회</span></span>'+
+          '<span class="hset-rpe">'+(st.rpe!=null?'RPE '+st.rpe:'')+'</span></div>';}).join('');
         var memo=h.en.memo?'<div class="hmemo">📝 '+esc(h.en.memo)+'</div>':'';
         return '<div class="hcard"><div class="faint" style="font-size:12px">'+esc(koDate(h.date))+' · '+daysAgoLabel(h.date)+'</div>'+
           '<div class="hvol">볼륨 <b>'+fmt(fromKg(vol,settings.unit))+'kg</b></div>'+
