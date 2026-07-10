@@ -110,8 +110,11 @@
   .entry-head .nm{font-weight:700;font-size:15px}
   .entry-head .bp{font-size:11px;color:var(--ink-faint);font-weight:600}
   .lastrec{font-size:12px;color:var(--ink-soft);margin:2px 0 10px;font-family:var(--mono)}
-  .setgrid{display:grid;grid-template-columns:22px 1fr 14px 1fr 1fr 30px;gap:6px;align-items:center;margin-bottom:6px}
-  .setgrid .idx{font-family:var(--mono);font-size:12px;color:var(--ink-faint);text-align:center}
+  .setgrid{display:grid;grid-template-columns:44px 1fr 12px 1fr 1fr 26px;gap:6px;align-items:center;margin-bottom:6px;border-radius:8px}
+  .setgrid.done{background:var(--good-soft)}
+  .setgrid .idx{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+  .setgrid .idx .setchk{width:20px;height:20px;margin:0;accent-color:var(--good);flex:none}
+  .setgrid.done .idx{color:var(--good);font-weight:700}
   .setgrid .x{text-align:center;color:var(--ink-faint);font-family:var(--mono)}
   .setgrid .rmset{border:none;background:none;color:var(--ink-faint);font-size:16px;cursor:pointer;padding:4px}
   .set-head{font-size:11px;color:var(--ink-faint);font-weight:600}
@@ -152,6 +155,12 @@
   .exrow .exn{font-weight:600;font-size:16px}
   .exrow .exbp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);flex:none}
   .exrow.addnew .exn{color:var(--accent-ink)}
+
+  /* routine item rows */
+  .reitem{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 2px;border-bottom:1px solid var(--line-soft)}
+  .reitem .reRm{border:none;background:none;font-size:16px;color:var(--ink-faint);cursor:pointer;padding:4px 6px}
+  .reitem-edit{padding:14px;border:1px solid var(--accent);border-radius:12px;background:var(--accent-soft);margin:10px 0}
+  .reitem-edit .fl{margin-bottom:4px}
 
   /* report bars */
   .barrow{display:flex;align-items:center;gap:10px;margin-bottom:11px}
@@ -369,7 +378,7 @@
    ============================================================ */
   function activeVolumeKg(){
     if(!active)return 0;var v=0;
-    active.entries.forEach(function(en){en.sets.forEach(function(s){if(s.reps>0&&s.weight>0)v+=toKg(s.weight,en.unit)*(+s.reps);});});
+    active.entries.forEach(function(en){en.sets.forEach(function(s){if(s.done&&s.reps>0&&s.weight>0)v+=toKg(s.weight,en.unit)*(+s.reps);});});
     return v;
   }
   function addEntry(name,bodyPart){
@@ -408,7 +417,7 @@
     }
 
     var hero=el("div",{class:"card hero"},
-      '<div class="row"><div><div class="lab">경과 시간</div><div class="time" id="elapsed">00:00</div></div>'+
+      '<div class="row"><div><div class="lab">'+(active.startTs?"경과 시간":"대기 중 · 첫 세트 입력 시 시작")+'</div><div class="time" id="elapsed">00:00</div></div>'+
       '<div><div class="lab" style="text-align:right">총 볼륨</div><div class="vol" id="liveVol">0 '+settings.unit+'</div></div></div>');
     v.appendChild(hero);
 
@@ -447,9 +456,9 @@
       '</div></div>'+lastHTML+
       '<div class="setgrid set-head"><div></div><div>무게('+esc(en.unit)+')</div><div></div><div>횟수</div><div>RPE</div><div></div></div>';
     en.sets.forEach(function(st,si){
-      var g=el("div",{class:"setgrid"});
+      var g=el("div",{class:"setgrid"+(st.done?" done":"")});
       g.innerHTML=
-        '<div class="idx">'+(si+1)+'</div>'+
+        '<div class="idx"><span>'+(si+1)+'</span><input type="checkbox" class="setchk" data-chk="1" data-ei="'+ei+'" data-si="'+si+'"'+(st.done?" checked":"")+' title="세트 완료"></div>'+
         '<input class="num" inputmode="decimal" data-f="weight" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.weight===""||st.weight==null?"":st.weight)+'" placeholder="0">'+
         '<div class="x">×</div>'+
         '<input class="num" inputmode="numeric" data-f="reps" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.reps===""||st.reps==null?"":st.reps)+'" placeholder="0">'+
@@ -498,11 +507,18 @@
     else if(act==="rmEntry"){if(confirm("이 종목을 삭제할까요?")){active.entries.splice(ei,1);persistActive();renderToday();}}
   });
   $("#view-today").addEventListener("change",function(e){
-    var inp=e.target.closest("input[data-f]");if(!inp||!active)return;
+    if(!active)return;
+    var chk=e.target.closest("input[data-chk]");
+    if(chk){var ci=+chk.getAttribute("data-ei"),cs=+chk.getAttribute("data-si");
+      active.entries[ci].sets[cs].done=chk.checked;
+      if(chk.checked)ensureTimerStarted();
+      persistActive();renderToday();return;}
+    var inp=e.target.closest("input[data-f]");if(!inp)return;
     var ei=+inp.getAttribute("data-ei"),si=+inp.getAttribute("data-si"),f=inp.getAttribute("data-f");
     var val=inp.value.trim();var st=active.entries[ei].sets[si];
     if(f==="rpe"){st.rpe=val===""?null:Math.max(6,Math.min(10,parseFloat(val)||0));}
     else{st[f]=val===""?"":(parseFloat(val)||0);}
+    if((+st.weight>0)||(+st.reps>0))ensureTimerStarted();  // 첫 데이터 입력 시 경과시간 시작
     persistActive();renderToday();
   });
 
@@ -512,9 +528,12 @@
    타이머
    ============================================================ */
   var timerInt=null;
+  // 첫 세트 입력/완료 시 경과시간 시작
+  function ensureTimerStarted(){if(active&&!active.startTs){active.startTs=Date.now();persistActive();}}
   function tickTimer(){
     if(!active){if(timerInt){clearInterval(timerInt);timerInt=null;}return;}
     function upd(){var el2=$("#elapsed");if(!el2||!active){if(timerInt){clearInterval(timerInt);timerInt=null;}return;}
+      if(!active.startTs){el2.textContent="00:00";return;}  // 아직 입력 전이면 대기
       var sec=Math.floor((Date.now()-active.startTs)/1000);
       var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
       el2.textContent=(h>0?String(h)+":":"")+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");}
@@ -525,7 +544,7 @@
    세션 시작/종료
    ============================================================ */
   function startSession(preItems){
-    active={id:uid("s"),date:todayISO(),startTs:Date.now(),endTs:null,entries:[]};
+    active={id:uid("s"),date:todayISO(),startTs:null,endTs:null,entries:[]};  // startTs는 첫 입력 때 설정
     if(preItems&&preItems.length){preItems.forEach(function(it){
       var last=lastRecord(it.exercise);
       var unit=last?last.unit:(settings.unit||"kg");
@@ -537,10 +556,14 @@
   }
   function endSession(){
     if(!active)return;
-    var kept=active.entries.filter(function(en){return en.sets.some(function(s){return s.weight>0&&s.reps>0;});});
-    kept.forEach(function(en){en.sets=en.sets.filter(function(s){return s.weight>0&&s.reps>0;});});
-    if(kept.length===0){if(confirm("기록된 세트가 없습니다. 운동을 취소할까요?")){active=null;save(K.active,null);if(timerInt){clearInterval(timerInt);timerInt=null;}renderToday();}return;}
-    var durationSec=Math.floor((Date.now()-active.startTs)/1000);
+    // 완료 체크된 세트만 기록·볼륨에 반영
+    var uncheckedCount=0;
+    active.entries.forEach(function(en){en.sets.forEach(function(s){if(!s.done&&s.weight>0&&s.reps>0)uncheckedCount++;});});
+    var kept=active.entries.filter(function(en){return en.sets.some(function(s){return s.done&&s.weight>0&&s.reps>0;});});
+    kept.forEach(function(en){en.sets=en.sets.filter(function(s){return s.done&&s.weight>0&&s.reps>0;});});
+    if(kept.length===0){if(confirm("완료 체크한 세트가 없습니다. 운동을 취소할까요?")){active=null;save(K.active,null);if(timerInt){clearInterval(timerInt);timerInt=null;}renderToday();}return;}
+    if(uncheckedCount>0 && !confirm("완료 체크 안 한 세트 "+uncheckedCount+"개는 저장되지 않습니다. 종료할까요?"))return;
+    var durationSec=active.startTs?Math.floor((Date.now()-active.startTs)/1000):0;
     var volKg=0,prs=[];
     kept.forEach(function(en){
       var exo=ensureEx(en.exercise,en.bodyPart);var bestE1=exo.best1RM;
@@ -885,11 +908,30 @@
 
   function openRoutineEditor(r){
     var editing=!!r;var draft=r?JSON.parse(JSON.stringify(r)):{id:uid("r"),name:"",bodyPart:"",items:[]};
+    var editIdx=-1;  // 인라인 편집 중인 종목 인덱스
     function paint(){var box=$("#reItems");if(!box)return;box.innerHTML="";
-      draft.items.forEach(function(it,i){var row=el("div",{style:"display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line-soft)"},
-        '<span><b>'+esc(it.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(it.bodyPart)+'</span></span><button class="rmset" data-i="'+i+'" style="border:none;background:none;font-size:16px;color:var(--ink-faint);cursor:pointer">✕</button>');
-        row.querySelector("button").onclick=function(){draft.items.splice(i,1);paint();};box.appendChild(row);});
-      if(!draft.items.length)box.innerHTML='<div class="faint" style="font-size:13px;padding:6px 0">아래 버튼으로 종목을 추가하세요</div>';}
+      if(!draft.items.length){box.innerHTML='<div class="faint" style="font-size:13px;padding:6px 0">아래 버튼으로 종목을 추가하세요</div>';return;}
+      draft.items.forEach(function(it,i){
+        if(i===editIdx){
+          var f=el("div",{class:"reitem-edit"});
+          f.innerHTML='<label class="fl">운동 이름</label><input class="reEditName" value="'+esc(it.exercise)+'" placeholder="운동 이름" style="margin-bottom:10px">'+
+            '<label class="fl">부위</label><select class="reEditBp" style="margin-bottom:12px"></select>'+
+            '<div class="btn-row"><button class="btn sm ghost reEditCancel">취소</button><button class="btn sm primary reEditSave">확인</button></div>';
+          var sel=f.querySelector(".reEditBp");
+          BODY_PARTS.concat(["기타"]).forEach(function(p){var o=el("option",{value:p},p);if(p===it.bodyPart)o.setAttribute("selected","selected");sel.appendChild(o);});
+          f.querySelector(".reEditCancel").onclick=function(){editIdx=-1;paint();};
+          f.querySelector(".reEditSave").onclick=function(){var nm=f.querySelector(".reEditName").value.trim();if(!nm){toast("이름을 입력하세요");return;}
+            it.exercise=nm;it.bodyPart=sel.value;ensureEx(nm,sel.value);editIdx=-1;paint();};
+          box.appendChild(f);
+        }else{
+          var row=el("div",{class:"reitem"},
+            '<span><b>'+esc(it.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(it.bodyPart)+'</span></span>'+
+            '<span style="display:flex;gap:4px;align-items:center"><button class="btn sm ghost reEdit">편집</button><button class="rmset reRm">✕</button></span>');
+          row.querySelector(".reEdit").onclick=function(){editIdx=i;paint();};
+          row.querySelector(".reRm").onclick=function(){draft.items.splice(i,1);editIdx=-1;paint();};
+          box.appendChild(row);
+        }
+      });}
     function render(){
       openSheet('<h3>'+(editing?"루틴 편집":"새 루틴")+'</h3><p class="sub">종목을 추가해 구성하세요</p>'+
         '<label class="fl">루틴 이름</label><input id="reName" placeholder="예: 등의 날" value="'+esc(draft.name)+'" style="margin-bottom:14px">'+
