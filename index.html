@@ -110,6 +110,21 @@
   .entry-head .nm{font-weight:700;font-size:15px}
   .entry-head .bp{font-size:11px;color:var(--ink-faint);font-weight:600}
   .lastrec{font-size:12px;color:var(--ink-soft);margin:2px 0 10px;font-family:var(--mono)}
+  button.lastrec.tap{display:inline-block;border:none;background:none;padding:2px 0;cursor:pointer;text-align:left;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+  button.lastrec.tap:active{color:var(--accent)}
+  .memo{font-size:13px;padding:8px 10px;border:1px dashed var(--line);border-radius:9px;margin:0 0 10px;background:var(--line-soft)}
+  .memo:focus{border-style:solid;background:var(--card)}
+  /* 지난 기록 팝업 */
+  .hlist{max-height:56vh;overflow:auto;-webkit-overflow-scrolling:touch}
+  .hcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:10px}
+  .hvol{font-size:18px;margin:2px 0}
+  .hmemo{font-size:13px;color:var(--ink-soft);background:var(--line-soft);border-radius:8px;padding:7px 10px;margin-bottom:8px}
+  .hsets2{display:flex;flex-direction:column;gap:1px}
+  .hset-row{display:grid;grid-template-columns:26px 1fr 1fr auto;align-items:center;gap:8px;padding:8px 4px;border-top:1px solid var(--line-soft);font-family:var(--mono)}
+  .hset-row .hset-i{color:var(--ink-faint);font-size:12px}
+  .hset-row .hset-w,.hset-row .hset-r{font-weight:700;font-size:15px}
+  .hset-row .u{font-weight:400;font-size:12px;color:var(--ink-faint)}
+  .hset-row .hset-rpe{font-size:11px;color:var(--ink-faint);font-family:inherit}
   .setgrid{display:grid;grid-template-columns:44px 1fr 12px 1fr 1fr 26px;gap:6px;align-items:center;margin-bottom:6px;border-radius:8px}
   .setgrid.done{background:var(--good-soft)}
   .setgrid .idx{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
@@ -375,7 +390,7 @@
         if(en.exercise===name){
           var best=null;
           for(var k=0;k<en.sets.length;k++){var st=en.sets[k];if(st.reps>0&&(best==null||toKg(st.weight,en.unit)>toKg(best.weight,en.unit)))best=st;}
-          if(best)return {set:best,unit:en.unit,date:s.date};
+          if(best)return {set:best,unit:en.unit,date:s.date,memo:en.memo||""};
         }
       }
     }
@@ -402,7 +417,7 @@
     // 종목은 마지막에 쓰던 단위를 기억 (A머신 kg / B머신 lb) → 없으면 kg 기본
     var unit=last?last.unit:(settings.unit||"kg");
     var seed=last?{weight:last.set.weight,reps:last.set.reps}:{weight:"",reps:""};
-    active.entries.push({exercise:name,bodyPart:e.bodyPart,unit:unit,
+    active.entries.push({exercise:name,bodyPart:e.bodyPart,unit:unit,memo:last?last.memo:"",
       sets:[{weight:seed.weight,reps:seed.reps,rpe:null}]});
     persistActive();renderToday();
   }
@@ -506,6 +521,12 @@
       '<div><div class="lab" style="text-align:right">총 볼륨</div><div class="vol" id="liveVol">0 '+settings.unit+'</div></div></div>');
     v.appendChild(hero);
 
+    if(active.entries.length>=2){
+      var rbar=el("div",{style:"display:flex;justify-content:flex-end;margin-bottom:8px"},
+        '<button class="btn sm ghost" id="reorderBtn">⠿ 순서 변경</button>');
+      v.appendChild(rbar);
+      $("#reorderBtn",rbar).onclick=openReorderSheet;
+    }
     var entryList=el("div",{id:"entryList"});
     active.entries.forEach(function(en,ei){entryList.appendChild(renderEntry(en,ei));});
     v.appendChild(entryList);
@@ -532,7 +553,7 @@
   function renderEntry(en,ei){
     var wrap=el("div",{class:"entry","data-row":"1","data-idx":String(ei)});
     var last=lastRecord(en.exercise);
-    var lastHTML=last?'<div class="lastrec">지난 기록: '+fmt(last.set.weight)+last.unit+' × '+last.set.reps+' · '+daysAgoLabel(last.date)+'</div>':'<div class="lastrec faint">첫 기록입니다</div>';
+    var lastHTML=last?'<button class="lastrec tap" data-act="history" data-ex="'+esc(en.exercise)+'">지난 기록: '+fmt(last.set.weight)+last.unit+' × '+last.set.reps+' · '+daysAgoLabel(last.date)+' ›</button>':'<div class="lastrec faint">첫 기록입니다</div>';
     wrap.innerHTML=
       '<div class="entry-head"><div style="display:flex;align-items:center;gap:8px;min-width:0">'+
         '<span class="drag-handle" data-drag-handle title="길게 눌러 순서 변경">⠿</span>'+
@@ -544,6 +565,7 @@
         '</div>'+
         '<button class="btn sm danger" data-act="rmEntry" data-ei="'+ei+'">삭제</button>'+
       '</div></div>'+lastHTML+
+      '<input class="memo" data-memo="'+ei+'" placeholder="메모… (그립·시트 높이·컨디션 등)" value="'+esc(en.memo||"")+'">'+
       '<div class="setgrid set-head"><div></div><div>무게('+esc(en.unit)+')</div><div></div><div>횟수</div><div>RPE</div><div></div></div>';
     en.sets.forEach(function(st,si){
       var g=el("div",{class:"setgrid"+(st.done?" done":"")});
@@ -576,11 +598,16 @@
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
-    var tReps=Math.max(1,Math.min(12,+st.reps));
-    var r=recommendNextSet(e1,tReps,en.unit);
-    var rir=10-TARGET_RPE;
-    return {pr:false,html:'<span class="em">💡</span><div>다음 세트 추천: <b>'+fmt(r.weight)+en.unit+' × '+r.reps+'회</b> '+
-      '<span class="faint">(목표 RPE '+TARGET_RPE+' · '+rir+'회 여유 · 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+')</span></div>'};
+    // 추천: 직전 세트 8회 이상이면 동일 무게 유지, 8회 미만이면 8회 가능 무게로 감량
+    var lastReps=+st.reps, curW=+st.weight, e1disp=fmt(fromKg(e1,en.unit))+en.unit;
+    if(lastReps>=8){
+      return {pr:false,html:'<span class="em">💡</span><div>다음 세트: 동일 무게 <b>'+fmt(curW)+en.unit+' 유지</b> '+
+        '<span class="faint">(8회 이상 목표 · 추정 1RM '+e1disp+')</span></div>'};
+    }
+    var dropW=recommendNextSet(e1,8,en.unit).weight;
+    if(dropW>=curW)dropW=roundToUnit(curW-incForUnit(en.unit),en.unit);
+    return {pr:false,html:'<span class="em">💡</span><div>다음 세트: <b>'+fmt(dropW)+en.unit+' × 8회</b>로 낮추기 '+
+      '<span class="faint">(직전 '+lastReps+'회 · 추정 1RM '+e1disp+')</span></div>'};
   }
 
   // 이벤트 위임 (오늘 뷰)
@@ -596,6 +623,11 @@
     else if(act==="rmSet"){var si=+t.getAttribute("data-si");active.entries[ei].sets.splice(si,1);
       if(active.entries[ei].sets.length===0)active.entries[ei].sets.push({weight:"",reps:"",rpe:null});persistActive();renderToday();}
     else if(act==="rmEntry"){if(confirm("이 종목을 삭제할까요?")){active.entries.splice(ei,1);persistActive();renderToday();}}
+    else if(act==="history"){openExerciseHistory(t.getAttribute("data-ex"));}
+  });
+  $("#view-today").addEventListener("input",function(e){
+    var m=e.target.closest("input[data-memo]");if(!m||!active)return;
+    active.entries[+m.getAttribute("data-memo")].memo=m.value;persistActive();  // 재렌더 없이 저장(포커스 유지)
   });
   $("#view-today").addEventListener("change",function(e){
     if(!active)return;
@@ -641,7 +673,7 @@
       var unit=last?last.unit:(settings.unit||"kg");
       var sets=[];var n=Math.max(1,it.targetSets||1);
       for(var i=0;i<n;i++)sets.push({weight:last?last.set.weight:"",reps:last?last.set.reps:(it.targetReps||""),rpe:null});
-      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,sets:sets});
+      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,memo:last?last.memo:"",sets:sets});
     });}
     persistActive();renderToday();
   }
@@ -912,6 +944,75 @@
     sessions.forEach(function(s){s.entries.forEach(function(en){var exo=ensureEx(en.exercise,en.bodyPart);
       en.sets.forEach(function(st){var e1=estimate1RM(toKg(st.weight,en.unit),+st.reps,st.rpe!=null?+st.rpe:null);if(e1>exo.best1RM)exo.best1RM=e1;});});});
     save(K.exercises,exercises);
+  }
+
+  // 지난 기록 팝업: 분석(추정1RM 추이) + 이전 기록(세션별 볼륨/e1RM/강도/세트)
+  var histExTab="records";
+  function openExerciseHistory(name){
+    var hist=[];  // {date, en} 최신순
+    for(var i=sessions.length-1;i>=0;i--){var s=sessions[i];s.entries.forEach(function(en){if(en.exercise===name)hist.push({date:s.date,en:en});});}
+    function e1e(en){var b=0;en.sets.forEach(function(st){var v=estimate1RM(toKg(st.weight,en.unit),+st.reps,st.rpe!=null?+st.rpe:null);if(v>b)b=v;});return b;}
+    function volE(en){var v=0;en.sets.forEach(function(st){v+=toKg(st.weight,en.unit)*(+st.reps);});return v;}
+    function maxW(en){var m=0;en.sets.forEach(function(st){var w=toKg(st.weight,en.unit);if(w>m)m=w;});return m;}
+    function koDate(iso){var p=iso.split("-");return +p[0]+"년 "+(+p[1])+"월 "+(+p[2])+"일";}
+    var head='<h3 style="margin-bottom:2px">'+esc(name)+'</h3><p class="sub" style="margin-bottom:12px">'+esc(bodyPartFor(name))+'</p>';
+    if(!hist.length){openSheet(head+'<div class="empty muted" style="padding:20px">아직 기록이 없습니다</div><button class="btn primary block" id="hClose">닫기</button>');$("#hClose").onclick=closeSheet;return;}
+
+    function recordsHTML(){
+      return '<div class="hlist">'+hist.map(function(h){
+        var vol=volE(h.en),e1=e1e(h.en),inten=e1>0?Math.round(maxW(h.en)/e1*100):0;
+        var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(i+1)+'</span>'+
+          '<span class="hset-w">'+fmt(st.weight)+' <span class="u">'+esc(h.en.unit)+'</span></span>'+
+          '<span class="hset-r">'+st.reps+' <span class="u">회</span></span>'+
+          (st.rpe!=null?'<span class="hset-rpe">RPE '+st.rpe+'</span>':'<span></span>')+'</div>';}).join('');
+        var memo=h.en.memo?'<div class="hmemo">📝 '+esc(h.en.memo)+'</div>':'';
+        return '<div class="hcard"><div class="faint" style="font-size:12px">'+esc(koDate(h.date))+' · '+daysAgoLabel(h.date)+'</div>'+
+          '<div class="hvol">볼륨 <b>'+fmt(fromKg(vol,settings.unit))+'kg</b></div>'+
+          '<div class="faint" style="font-size:13px;margin-bottom:8px">e1RM '+fmt(fromKg(e1,settings.unit))+'kg · 강도 '+inten+'%</div>'+
+          memo+'<div class="hsets2">'+rows+'</div></div>';
+      }).join('')+'</div>';
+    }
+    function analysisHTML(){
+      var series=hist.slice().reverse().map(function(h){return e1e(h.en);});   // 오래된→최근
+      var dates=hist.slice().reverse().map(function(h){return h.date;});
+      var cur=series[series.length-1];
+      var out='<div class="card" style="padding:14px;margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center">'+
+        '<span style="font-weight:700">내 현재 추정 1RM</span><span class="mono" style="font-size:22px;font-weight:800;color:var(--accent-ink)">'+fmt(fromKg(cur,settings.unit))+settings.unit+'</span></div></div>';
+      if(series.length<2)return out+'<div class="faint" style="font-size:13px;padding:6px 2px">추이는 2회 이상 기록 시 표시됩니다</div>';
+      var minV=Math.min.apply(null,series),maxV=Math.max.apply(null,series);
+      var minI=series.indexOf(minV),maxI=series.indexOf(maxV);
+      var growth=series[0]>0?Math.round((cur-series[0])/series[0]*100):null;
+      return out+'<div class="card" style="padding:14px;margin-bottom:12px">'+
+        (growth!=null&&growth>0?'<div style="font-weight:700;margin-bottom:10px">추정 1RM이 처음보다 <span style="color:var(--good)">'+growth+'% 성장</span>했어요</div>':'')+
+        sparkline(series)+
+        '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-faint);margin-top:4px"><span>'+esc(dates[0].slice(2).replace(/-/g,"."))+'</span><span>'+esc(dates[dates.length-1].slice(2).replace(/-/g,"."))+'</span></div>'+
+        '<div style="display:flex;gap:10px;margin-top:12px">'+
+          '<div class="stat" style="flex:1"><div class="n">'+fmt(fromKg(minV,settings.unit))+'</div><div class="l">최저 · '+esc(dates[minI].slice(5).replace("-","/"))+'</div></div>'+
+          '<div class="stat" style="flex:1"><div class="n">'+fmt(fromKg(maxV,settings.unit))+'</div><div class="l">최고 · '+esc(dates[maxI].slice(5).replace("-","/"))+'</div></div>'+
+        '</div></div>';
+    }
+    function render(){
+      var tabs='<div class="subtabs"><button data-t="analysis" class="'+(histExTab==="analysis"?"on":"")+'">분석</button><button data-t="records" class="'+(histExTab==="records"?"on":"")+'">이전 기록</button></div>';
+      openSheet(head+tabs+(histExTab==="analysis"?analysisHTML():recordsHTML())+'<button class="btn primary block" id="hClose" style="margin-top:14px">닫기</button>');
+      $$($("#sheet"),".subtabs button").forEach(function(b){b.onclick=function(){histExTab=b.getAttribute("data-t");render();};});
+      $("#hClose").onclick=closeSheet;
+    }
+    histExTab="records";render();
+  }
+
+  // 순서 변경 팝업(오늘 탭): 이름만 있는 컴팩트 목록에서 드래그로 재배치
+  function openReorderSheet(){
+    if(!active||active.entries.length<2)return;
+    openSheet('<h3>순서 변경</h3><p class="sub">⠿ 을 잡고 드래그해 순서를 바꾸세요 (터치는 길게 누른 뒤)</p>'+
+      '<div id="reorderList"></div>'+
+      '<button class="btn primary block" id="reorderDone" style="margin-top:14px">완료</button>', true);
+    function paint(){var box=$("#reorderList");if(!box)return;box.innerHTML="";
+      active.entries.forEach(function(en,i){box.appendChild(el("div",{class:"reitem","data-row":"1","data-idx":String(i)},
+        '<span class="drag-handle" data-drag-handle title="드래그로 순서 변경">⠿</span>'+
+        '<span class="reitem-name"><b>'+esc(en.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(en.bodyPart)+'</span></span>'));});
+      enableDragSort(box,function(){return active.entries;},function(a){active.entries=a;persistActive();paint();});}
+    paint();
+    $("#reorderDone").onclick=function(){closeSheet();renderToday();};
   }
 
   function emptyCard(icon,title,sub){return el("div",{class:"card empty"},'<div class="big">'+icon+'</div><div style="font-weight:700;color:var(--ink)">'+title+'</div><div class="muted" style="margin-top:6px">'+sub+'</div>');}
