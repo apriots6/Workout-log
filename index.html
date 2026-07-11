@@ -222,13 +222,14 @@
   .dd-row{display:flex;justify-content:space-between;padding:5px 0;font-size:14px;border-top:1px solid var(--line)}
   .dd-row:first-of-type{border-top:none}
   /* 홈 이번 주 스트립 */
-  .wk-card{cursor:pointer}
   .wk-strip{display:flex;gap:4px}
-  .wk-day{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .wk-day{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer}
+  .wk-day:active{opacity:.7}
   .wk-lbl{font-size:11px;color:var(--ink-faint);font-weight:600}
   .wk-dot{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-family:var(--mono);background:var(--line-soft);color:var(--ink-soft)}
   .wk-dot.on{background:var(--accent);color:#fff;font-weight:700}
   .wk-day.today .wk-dot{box-shadow:0 0 0 2px var(--accent-ink)}
+  .wk-day.sel .wk-dot{box-shadow:0 0 0 2px var(--pr)}
   /* 운동 달력 */
   .calnav{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
   .calnav .rng{font-weight:700;font-size:17px}
@@ -236,7 +237,7 @@
   .cal-wdh{margin-bottom:6px}
   .cal-wdh div{text-align:center;font-size:12px;color:var(--ink-faint);font-weight:600}
   .cal-cell{aspect-ratio:1;display:grid;place-items:center;font-size:14px;font-family:var(--mono);border-radius:50%;color:var(--ink)}
-  .cal-cell.empty{visibility:hidden}
+  .cal-cell.blank{visibility:hidden}
   .cal-cell.has{background:var(--accent);color:#fff;font-weight:700;cursor:pointer}
   .cal-cell.today{box-shadow:inset 0 0 0 2px var(--accent-ink)}
   .cal-cell.sel{outline:2px solid var(--pr);outline-offset:-2px}
@@ -531,6 +532,7 @@
 /* ============================================================
    렌더: 오늘
    ============================================================ */
+  var homeSelIso=null;  // 홈 스트립에서 선택한 날짜(그날 기록 인라인 표시)
   function renderToday(){
     var v=$("#view-today");v.innerHTML="";
     if(!active){
@@ -541,20 +543,26 @@
         '<button class="btn ghost" id="startRoutineBtn">루틴에서 시작</button></div>'));
       $("#startBtn").onclick=function(){startSession();};
       $("#startRoutineBtn").onclick=openRoutinePicker;
-      // 이번 주 운동 현황 (탭하면 달력)
+      // 이번 주 운동 현황: 날짜 탭 → 아래에 그날 기록 / '달력 ›' → 달력 팝업
       var wd=weekDayData(0), cnt=wd.filter(function(d){return d.vol>0;}).length, todayIso=todayISO();
-      var strip=wd.map(function(d,i){return '<div class="wk-day'+(d.iso===todayIso?" today":"")+'"><div class="wk-lbl">'+WEEKDAYS[i]+'</div>'+
+      var weekIsos=wd.map(function(d){return d.iso;});
+      function hasWk(iso){return sessions.some(function(s){return s.date===iso;});}
+      var selIso=(homeSelIso&&weekIsos.indexOf(homeSelIso)>=0)?homeSelIso:(hasWk(todayIso)?todayIso:(wd.filter(function(d){return d.vol>0;}).map(function(d){return d.iso;}).pop()||todayIso));
+      var strip=wd.map(function(d,i){return '<div class="wk-day'+(d.iso===todayIso?" today":"")+(d.iso===selIso?" sel":"")+'" data-iso="'+d.iso+'"><div class="wk-lbl">'+WEEKDAYS[i]+'</div>'+
         '<div class="wk-dot'+(d.vol>0?" on":"")+'">'+(+d.iso.slice(8))+'</div></div>';}).join('');
-      var wkCard=el("div",{class:"card wk-card"},
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:700">이번 주 운동 <span class="badge accent">'+cnt+'회</span></div><span class="faint" style="font-size:13px">달력 ›</span></div>'+
+      var wkCard=el("div",{class:"card"},
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:700">이번 주 운동 <span class="badge accent">'+cnt+'회</span></div><button class="btn sm ghost" id="openCal">달력 ›</button></div>'+
         '<div class="wk-strip">'+strip+'</div>');
-      wkCard.onclick=openCalendarSheet;
       v.appendChild(wkCard);
-      if(sessions.length){
-        var ls=sessions[sessions.length-1];
-        v.appendChild(el("div",{class:"card"},
-          '<div class="sectitle">최근 운동</div><div style="display:flex;justify-content:space-between"><div><b>'+esc(ls.date)+'</b> · '+ls.entries.length+'개 종목</div>'+
-          '<div class="mono muted">'+fmt(fromKg(ls.totalVolume,settings.unit))+' '+settings.unit+'</div></div>'));
+      $("#openCal",wkCard).onclick=openCalendarSheet;
+      $$(wkCard,".wk-day[data-iso]").forEach(function(c){c.onclick=function(){homeSelIso=c.getAttribute("data-iso");renderToday();};});
+      var dowLbl=WEEKDAYS[(new Date(selIso+"T00:00:00").getDay()+6)%7];
+      if(hasWk(selIso)){
+        var dc=el("div",{class:"card"},'<div class="sectitle">진행한 운동</div>');
+        dc.insertAdjacentHTML("beforeend",dayDetailHTML(selIso));
+        v.appendChild(dc);
+      }else{
+        v.appendChild(el("div",{class:"card"},'<div class="muted" style="font-size:13px;text-align:center;padding:6px">'+selIso.slice(5).replace("-","/")+' ('+dowLbl+') · 운동 기록이 없어요</div>'));
       }
       return;
     }
@@ -1322,7 +1330,7 @@
     function p2(n){return n<10?"0"+n:""+n;}
     function render(){
       var startDow=(new Date(calY,calM,1).getDay()+6)%7, dim=new Date(calY,calM+1,0).getDate(), todayIso=todayISO(), mCount=0, cells='';
-      for(var i=0;i<startDow;i++)cells+='<div class="cal-cell empty"></div>';
+      for(var i=0;i<startDow;i++)cells+='<div class="cal-cell blank"></div>';
       for(var d=1;d<=dim;d++){var iso=calY+"-"+p2(calM+1)+"-"+p2(d);if(workoutSet[iso])mCount++;
         cells+='<div class="cal-cell'+(workoutSet[iso]?" has":"")+(iso===todayIso?" today":"")+(iso===selIso?" sel":"")+'" data-iso="'+iso+'">'+d+'</div>';}
       var detail=selIso?dayDetailHTML(selIso):'<div class="faint" style="text-align:center;font-size:13px;padding:8px">파란 날짜를 눌러 그날 운동을 보세요 · 이번 달 <b>'+mCount+'일</b> 운동</div>';
