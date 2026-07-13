@@ -57,6 +57,8 @@
   .unit-mini{display:inline-flex;background:var(--line-soft);border:1px solid var(--line);border-radius:999px;padding:2px;font-family:var(--mono);font-size:11px;font-weight:700}
   .unit-mini button{border:none;background:none;color:var(--ink-faint);padding:3px 9px;border-radius:999px;cursor:pointer;font:inherit;line-height:1.4}
   .unit-mini button.on{background:var(--card);color:var(--accent-ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .inc-row{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+  .inc-lbl{font-size:12px;color:var(--ink-faint);font-weight:600}
   .icon-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-size:17px;line-height:1;display:grid;place-items:center;color:var(--ink-soft)}
   .icon-btn:active{transform:scale(.96)}
 
@@ -387,7 +389,12 @@
   function toKg(w,unit){w=+w||0;return unit==="lb"?w/LB_PER_KG:w;}
   function fromKg(w,unit){return unit==="lb"?w*LB_PER_KG:w;}
   function incForUnit(unit){return unit==="lb"?settings.incrementLb:settings.incrementKg;}
-  function roundToUnit(w,unit){var inc=incForUnit(unit);return Math.round(w/inc)*inc;}
+  function roundToUnit(w,unit){var inc=incForUnit(unit);return Math.round(w/inc)*inc;}  // 단위 변환용(2.5kg/5lb, 값 보존)
+  // 종목별 추천 증량 단위: 프리웨이트 kg 5, 머신 lb 10 기본. 종목 카드에서 변경.
+  function incDefault(unit){return unit==="lb"?10:5;}
+  function incOptionsFor(unit){return unit==="lb"?[5,10,15,25]:[2.5,5,10];}
+  function entryInc(en){return (en&&en.inc>0)?en.inc:incDefault(en?en.unit:"kg");}
+  function roundInc(w,inc){inc=inc||5;return Math.round(w/inc)*inc;}
 
 /* ============================================================
    추천/1RM 계산
@@ -403,9 +410,9 @@
     return weightKg*(1+reps/30); // Epley 폴백
   }
   // 다음 세트 추천: 표시 단위 기준 weight 반환
-  function recommendNextSet(e1rmKg,targetReps,unit){
+  function recommendNextSet(e1rmKg,targetReps,unit,inc){
     var pct=pctFromRepsRPE(targetReps,TARGET_RPE);
-    var wDisp=roundToUnit(fromKg(e1rmKg*pct,unit),unit);
+    var wDisp=roundInc(fromKg(e1rmKg*pct,unit),inc);
     return {weight:wDisp,reps:targetReps,rpe:TARGET_RPE};
   }
 
@@ -425,7 +432,7 @@
         if(en.exercise===name){
           var best=null;
           for(var k=0;k<en.sets.length;k++){var st=en.sets[k];if(st.reps>0&&(best==null||toKg(st.weight,en.unit)>toKg(best.weight,en.unit)))best=st;}
-          if(best)return {set:best,unit:en.unit,date:s.date,memo:en.memo||""};
+          if(best)return {set:best,unit:en.unit,date:s.date,memo:en.memo||"",inc:en.inc>0?en.inc:0};
         }
       }
     }
@@ -452,7 +459,7 @@
     // 종목은 마지막에 쓰던 단위를 기억 (A머신 kg / B머신 lb) → 없으면 kg 기본
     var unit=last?last.unit:(settings.unit||"kg");
     var seed=last?{weight:last.set.weight,reps:last.set.reps}:{weight:"",reps:""};
-    active.entries.push({exercise:name,bodyPart:e.bodyPart,unit:unit,memo:last?last.memo:"",
+    active.entries.push({exercise:name,bodyPart:e.bodyPart,unit:unit,memo:last?last.memo:"",inc:(last&&last.inc>0)?last.inc:incDefault(unit),
       sets:[{weight:seed.weight,reps:seed.reps,rpe:null}]});
     persistActive();renderToday();
   }
@@ -617,6 +624,9 @@
         '<button class="btn sm danger" data-act="rmEntry" data-ei="'+ei+'">삭제</button>'+
       '</div></div>'+lastHTML+
       '<input class="memo" data-memo="'+ei+'" placeholder="메모… (그립·시트 높이·컨디션 등)" value="'+esc(en.memo||"")+'">'+
+      '<div class="inc-row"><span class="inc-lbl">추천 증량 단위</span><span class="unit-mini inc-pill" title="다음 세트 추천을 이 단위로 반올림">'+
+        incOptionsFor(en.unit).map(function(o){return '<button data-act="setInc" data-ei="'+ei+'" data-inc="'+o+'" class="'+(entryInc(en)===o?"on":"")+'">'+fmt(o)+'</button>';}).join('')+
+      '</span><span class="inc-lbl">'+esc(en.unit)+'</span></div>'+
       '<div class="setgrid set-head"><div></div><div>무게('+esc(en.unit)+')</div><div></div><div>횟수</div><div>RPE</div><div></div></div>';
     en.sets.forEach(function(st,si){
       var g=el("div",{class:"setgrid"+(st.done?" done":"")});
@@ -643,9 +653,10 @@
     if(!st)return null;
     var wKg=toKg(st.weight,en.unit);
     var e1=estimate1RM(wKg,+st.reps,st.rpe!=null?+st.rpe:null);
+    var inc=entryInc(en);  // 이 종목의 증량 단위
     var exObj=findEx(en.exercise);var prev=exObj?exObj.best1RM:0;
     if(e1>prev*1.001 && prev>0 && +st.reps<=12){
-      var attempt=roundToUnit(fromKg(e1*pctFromRepsRPE(3,9),en.unit),en.unit);
+      var attempt=roundInc(fromKg(e1*pctFromRepsRPE(3,9),en.unit),inc);
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
@@ -655,8 +666,8 @@
       return {pr:false,html:'<span class="em">💡</span><div>다음 세트: 동일 무게 <b>'+fmt(curW)+en.unit+' 유지</b> '+
         '<span class="faint">(8회 이상 목표 · 추정 1RM '+e1disp+')</span></div>'};
     }
-    var dropW=recommendNextSet(e1,8,en.unit).weight;
-    if(dropW>=curW)dropW=roundToUnit(curW-incForUnit(en.unit),en.unit);
+    var dropW=recommendNextSet(e1,8,en.unit,inc).weight;
+    if(dropW>=curW)dropW=roundInc(curW-inc,inc);
     return {pr:false,html:'<span class="em">💡</span><div>다음 세트: <b>'+fmt(dropW)+en.unit+' × 8회</b>로 낮추기 '+
       '<span class="faint">(직전 '+lastReps+'회 · 추정 1RM '+e1disp+')</span></div>'};
   }
@@ -668,7 +679,8 @@
     if(act==="setUnit"){var nu=t.getAttribute("data-u");var en=active.entries[ei];if(nu!==en.unit){
         // 종목 단위 변경: 실제 무게가 유지되도록 값 변환 후 단위 증량 단위로 반올림
         en.sets.forEach(function(s){if(s.weight!==""&&s.weight!=null&&!isNaN(s.weight)&&+s.weight>0){s.weight=roundToUnit(fromKg(toKg(s.weight,en.unit),nu),nu);}});
-        en.unit=nu;persistActive();renderToday();}}
+        en.unit=nu;en.inc=incDefault(nu);persistActive();renderToday();}}  // 단위 바뀌면 증량 단위도 기본값으로
+    else if(act==="setInc"){active.entries[ei].inc=+t.getAttribute("data-inc");persistActive();renderToday();}
     else if(act==="addSet"){var last=active.entries[ei].sets.slice(-1)[0]||{weight:"",reps:"",rpe:null};
       active.entries[ei].sets.push({weight:last.weight,reps:last.reps,rpe:null});persistActive();renderToday();}
     else if(act==="rmSet"){var si=+t.getAttribute("data-si");active.entries[ei].sets.splice(si,1);
@@ -724,7 +736,7 @@
       var unit=last?last.unit:(settings.unit||"kg");
       var sets=[];var n=Math.max(1,it.targetSets||1);
       for(var i=0;i<n;i++)sets.push({weight:last?last.set.weight:"",reps:last?last.set.reps:(it.targetReps||""),rpe:null});
-      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,memo:last?last.memo:"",sets:sets});
+      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,memo:last?last.memo:"",inc:(last&&last.inc>0)?last.inc:incDefault(unit),sets:sets});
     });}
     persistActive();renderToday();
   }
