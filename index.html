@@ -252,9 +252,10 @@
   nav.tabs button.on{color:var(--accent)}
 
   /* modal */
-  .scrim{position:fixed;inset:0;background:rgba(15,20,30,.42);z-index:50;display:none;align-items:flex-end;justify-content:center}
+  .scrim{position:fixed;inset:0;background:rgba(15,20,30,.42);z-index:50;display:none;align-items:flex-end;justify-content:center;touch-action:none;overscroll-behavior:none}
   .scrim.open{display:flex}
-  .sheet{background:var(--card);width:100%;max-width:560px;border-radius:20px 20px 0 0;padding:20px 18px calc(22px + env(safe-area-inset-bottom));box-shadow:0 -8px 40px rgba(0,0,0,.2);animation:up .22s ease;max-height:88vh;overflow:auto}
+  body.noscroll{overflow:hidden}
+  .sheet{background:var(--card);width:100%;max-width:560px;border-radius:20px 20px 0 0;padding:20px 18px calc(22px + env(safe-area-inset-bottom));box-shadow:0 -8px 40px rgba(0,0,0,.2);animation:up .22s ease;max-height:88vh;overflow:auto;touch-action:pan-y;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
   @media(min-width:560px){.scrim{align-items:center}.sheet{border-radius:20px}}
   @keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
   .sheet h3{margin:0 0 4px;font-size:19px;font-weight:800}
@@ -1121,7 +1122,8 @@
       var card=el("div",{class:"card"},
         '<div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:16px">'+esc(r.name)+'</b>'+
         (r.bodyPart?'<span class="badge accent">'+esc(r.bodyPart)+'</span>':'')+'</div>'+
-        '<div class="muted mono" style="font-size:13px;margin:6px 0 12px">'+r.items.map(function(it){return esc(it.exercise);}).join(" · ")+'</div>'+
+        '<div class="muted" style="font-size:13px;font-weight:600;margin:8px 0 6px">'+r.items.length+'종목</div>'+
+        '<div style="margin-bottom:14px">'+r.items.map(function(it){return '<div style="font-size:14.5px;color:var(--ink);padding:7px 0;border-top:1px solid var(--line-soft)">'+esc(it.exercise)+' <span class="faint" style="font-size:11px;font-weight:500;margin-left:2px">'+esc(it.bodyPart)+'</span></div>';}).join("")+'</div>'+
         '<div class="btn-row"><button class="btn primary" data-start="'+r.id+'">이 루틴으로 시작</button>'+
         '<button class="btn ghost sm" data-edit="'+r.id+'">편집</button>'+
         '<button class="btn danger sm" data-delr="'+r.id+'">삭제</button></div>');
@@ -1169,6 +1171,7 @@
       '<input id="pkSearch" placeholder="검색하거나 새 종목 입력" autocomplete="off" style="margin-bottom:12px">'+
       '<div class="catrow" id="pkCats"></div>'+
       '<div class="exlistbox" id="pkList"></div>', locked);
+    scrimClose=function(){if(onCancel)onCancel();else closeSheet();};   // 바깥 터치 = 닫기/취소(편집기로 복귀)
     $("#pkClose").onclick=function(){if(onCancel)onCancel();else closeSheet();};
     function catalog(){var m={};Object.keys(SEED_EX).forEach(function(n){m[n]=SEED_EX[n];});exercises.forEach(function(e){if(e.name)m[e.name]=e.bodyPart||m[e.name]||"기타";});return m;}
     function paintCats(){var r=$("#pkCats");r.innerHTML=PICK_CATS.map(function(ct){return '<button class="catchip'+(ct===pickerCat?" on":"")+'" data-c="'+ct+'">'+ct+'</button>';}).join("");
@@ -1219,7 +1222,13 @@
         }
       });
       enableDragSort(box,function(){return draft.items;},function(a){draft.items=a;editIdx=-1;paint();});}
-    function tryClose(){if(draft.items.length||($("#reName")&&$("#reName").value.trim())){if(!confirm("만들던 루틴을 취소할까요? 저장하지 않은 내용은 사라집니다."))return;}closeSheet();}
+    function isDirty(){
+      var curName=($("#reName")?$("#reName").value:draft.name).trim();
+      var cur=JSON.stringify({name:curName,items:draft.items});
+      if(editing)return cur!==JSON.stringify({name:(r.name||"").trim(),items:r.items});
+      return draft.items.length>0||curName.length>0;   // 새 루틴은 입력이 하나라도 있으면 확인
+    }
+    function tryClose(){if(isDirty()&&!confirm("만들던 루틴을 취소할까요? 저장하지 않은 내용은 사라집니다."))return;closeSheet();}
     function render(){
       openSheet('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><h3 style="margin:0">'+(editing?"루틴 편집":"새 루틴")+'</h3>'+
         '<button class="btn sm ghost" id="reClose">취소</button></div><p class="sub">종목 추가 · ⠿ 길게 눌러 순서 변경</p>'+
@@ -1228,6 +1237,7 @@
         '<button class="btn ghost block" id="reAddOpen" style="margin-top:8px">＋ 종목 추가</button>'+
         '<button class="btn good block" id="reSave" style="margin-top:12px">저장</button>', true);
       paint();
+      scrimClose=tryClose;   // 팝업 위 공백 터치 시에도 변경 확인 후 닫기
       $("#reClose").onclick=tryClose;
       $("#reAddOpen").onclick=function(){draft.name=$("#reName").value;
         openExercisePicker(function(name,bp){draft.items.push({exercise:name,bodyPart:bp,targetSets:3,targetReps:""});ensureEx(name,bp);render();},render,true);};
@@ -1449,10 +1459,13 @@
 /* ============================================================
    시트/모달
    ============================================================ */
-  var sheetLocked=false;  // true면 바깥 터치로 안 닫힘(루틴 편집 등 데이터 유실 방지)
-  function openSheet(html,locked){var s=$("#sheet");s.innerHTML=html;sheetLocked=!!locked;$("#scrim").classList.add("open");}
-  function closeSheet(){sheetLocked=false;$("#scrim").classList.remove("open");}
-  $("#scrim").addEventListener("click",function(e){if(e.target===this&&!sheetLocked)closeSheet();});
+  var sheetLocked=false;  // true면 바깥 터치로 안 닫힘(데이터 유실 방지)
+  var scrimClose=null;    // 설정되면 바깥 터치 시 이 함수가 닫기를 처리(변경 확인 등)
+  function openSheet(html,locked){var s=$("#sheet");s.innerHTML=html;sheetLocked=!!locked;scrimClose=null;
+    $("#scrim").classList.add("open");document.body.classList.add("noscroll");s.scrollTop=0;}
+  function closeSheet(){sheetLocked=false;scrimClose=null;$("#scrim").classList.remove("open");document.body.classList.remove("noscroll");}
+  $("#scrim").addEventListener("click",function(e){if(e.target!==this)return;   // 시트 바깥(공백)만
+    if(scrimClose)scrimClose();else if(!sheetLocked)closeSheet();});
 
   function openMenu(){
     openSheet('<h3>메뉴</h3><p class="sub">설정 · 데이터 백업 · 정보</p>'+
