@@ -390,11 +390,33 @@
   function fromKg(w,unit){return unit==="lb"?w*LB_PER_KG:w;}
   function incForUnit(unit){return unit==="lb"?settings.incrementLb:settings.incrementKg;}
   function roundToUnit(w,unit){var inc=incForUnit(unit);return Math.round(w/inc)*inc;}  // 단위 변환용(2.5kg/5lb, 값 보존)
-  // 종목별 추천 증량 단위: 프리웨이트 kg 5, 머신 lb 10 기본. 종목 카드에서 변경.
-  function incDefault(unit){return unit==="lb"?10:5;}
-  function incOptionsFor(unit){return unit==="lb"?[5,10,15,25]:[2.5,5,10];}
-  function entryInc(en){return (en&&en.inc>0)?en.inc:incDefault(en?en.unit:"kg");}
   function roundInc(w,inc){inc=inc||5;return Math.round(w/inc)*inc;}
+  // 종목별 증량 단위 자동 추론: 그 종목에 실제로 입력한 무게들의 최대공약수로 판단.
+  //   5kg스텝→5, 덤벨 2kg→2, 2.5kg→2.5, 머신 10/15lb→10lb 처럼 입력 데이터에 맞춘다. 표시 단위(en.unit) 기준.
+  function gcdNum(a,b){a=Math.round(Math.abs(a));b=Math.round(Math.abs(b));while(b){var t=a%b;a=b;b=t;}return a;}
+  function detectInc(en){
+    var lb=en.unit==="lb", q=[];
+    function add(w){w=+w;if(w>0)q.push(Math.round(w*4));}   // 0.25 해상도로 정수화
+    (en.sets||[]).forEach(function(s){add(s.weight);});
+    for(var i=sessions.length-1;i>=0 && q.length<80;i--){var s=sessions[i];
+      for(var j=0;j<s.entries.length;j++){var e2=s.entries[j];
+        if(e2.exercise===en.exercise && e2.unit===en.unit)(e2.sets||[]).forEach(function(st){add(st.weight);});}}
+    var uniq=[];q.forEach(function(v){if(uniq.indexOf(v)<0)uniq.push(v);});
+    if(uniq.length===0)return lb?10:5;
+    if(uniq.length===1){var w=uniq[0]/4;                    // 값이 하나뿐이면 나눠떨어지는 기준으로
+      if(lb)return w%10===0?10:5;
+      if(w%5===0)return 5;if(w%2===0)return 2;if((w*2)%5===0)return 2.5;return 2.5;}
+    var g=uniq[0];for(var k=1;k<uniq.length;k++)g=gcdNum(g,uniq[k]);
+    var inc=g/4;
+    if(lb)return inc>=10?10:5;                               // lb는 5/10 단위로
+    if(inc>=5)return 5;if(inc>=2.5)return 2.5;if(inc>=2)return 2;return 2.5; // kg 상한 5, 덤벨 2/2.5 보존
+  }
+  // 어시스트(체중보조) 종목: 입력 무게만큼 체중을 덜어줌 → 유효부하 = 체중 − 입력무게. 0 입력 = 순수 체중.
+  function isAssist(en){return !!(en&&en.mode==="assist");}
+  function assistDefault(name){return /어시스트|assist|assisted/i.test(name||"");}
+  function setKg(en,st){var w=toKg(st.weight,en.unit);
+    if(isAssist(en)){var bw=+settings.bodyweightKg||70;return Math.max(0,bw-w);}return w;}
+  var FATIGUE_FACTOR=0.95;  // 직전 세트 피로 반영(다음 세트 추천 무게를 약간 하향)
 
 /* ============================================================
    추천/1RM 계산
@@ -408,12 +430,6 @@
   function estimate1RM(weightKg,reps,rpe){
     if(rpe!=null && reps<=12 && reps>=1){return weightKg/pctFromRepsRPE(reps,rpe);}
     return weightKg*(1+reps/30); // Epley 폴백
-  }
-  // 다음 세트 추천: 표시 단위 기준 weight 반환
-  function recommendNextSet(e1rmKg,targetReps,unit,inc){
-    var pct=pctFromRepsRPE(targetReps,TARGET_RPE);
-    var wDisp=roundInc(fromKg(e1rmKg*pct,unit),inc);
-    return {weight:wDisp,reps:targetReps,rpe:TARGET_RPE};
   }
 
 /* ============================================================
@@ -431,8 +447,8 @@
         var en=s.entries[j];
         if(en.exercise===name){
           var best=null;
-          for(var k=0;k<en.sets.length;k++){var st=en.sets[k];if(st.reps>0&&(best==null||toKg(st.weight,en.unit)>toKg(best.weight,en.unit)))best=st;}
-          if(best)return {set:best,unit:en.unit,date:s.date,memo:en.memo||"",inc:en.inc>0?en.inc:0};
+          for(var k=0;k<en.sets.length;k++){var st=en.sets[k];if(st.reps>0&&(best==null||setKg(en,st)>setKg(en,best)))best=st;}
+          if(best)return {set:best,unit:en.unit,date:s.date,memo:en.memo||"",mode:en.mode||"weight"};
         }
       }
     }
@@ -449,7 +465,7 @@
    ============================================================ */
   function activeVolumeKg(){
     if(!active)return 0;var v=0;
-    active.entries.forEach(function(en){en.sets.forEach(function(s){if(s.done&&s.reps>0&&s.weight>0)v+=toKg(s.weight,en.unit)*(+s.reps);});});
+    active.entries.forEach(function(en){en.sets.forEach(function(s){if(s.done&&+s.reps>0&&(isAssist(en)||+s.weight>0))v+=setKg(en,s)*(+s.reps);});});
     return v;
   }
   function addEntry(name,bodyPart){
@@ -458,8 +474,10 @@
     var last=lastRecord(name);
     // 종목은 마지막에 쓰던 단위를 기억 (A머신 kg / B머신 lb) → 없으면 kg 기본
     var unit=last?last.unit:(settings.unit||"kg");
+    var mode=e.mode||(last&&last.mode)||(assistDefault(name)?"assist":"weight");
+    e.mode=mode;save(K.exercises,exercises);   // 종목 카탈로그에 계산 방식 기억
     var seed=last?{weight:last.set.weight,reps:last.set.reps}:{weight:"",reps:""};
-    active.entries.push({exercise:name,bodyPart:e.bodyPart,unit:unit,memo:last?last.memo:"",inc:(last&&last.inc>0)?last.inc:incDefault(unit),
+    active.entries.push({exercise:name,bodyPart:e.bodyPart,unit:unit,mode:mode,memo:last?last.memo:"",
       sets:[{weight:seed.weight,reps:seed.reps,rpe:null}]});
     persistActive();renderToday();
   }
@@ -624,10 +642,11 @@
         '<button class="btn sm danger" data-act="rmEntry" data-ei="'+ei+'">삭제</button>'+
       '</div></div>'+lastHTML+
       '<input class="memo" data-memo="'+ei+'" placeholder="메모… (그립·시트 높이·컨디션 등)" value="'+esc(en.memo||"")+'">'+
-      '<div class="inc-row"><span class="inc-lbl">추천 증량 단위</span><span class="unit-mini inc-pill" title="다음 세트 추천을 이 단위로 반올림">'+
-        incOptionsFor(en.unit).map(function(o){return '<button data-act="setInc" data-ei="'+ei+'" data-inc="'+o+'" class="'+(entryInc(en)===o?"on":"")+'">'+fmt(o)+'</button>';}).join('')+
-      '</span><span class="inc-lbl">'+esc(en.unit)+'</span></div>'+
-      '<div class="setgrid set-head"><div></div><div>무게('+esc(en.unit)+')</div><div></div><div>횟수</div><div>RPE</div><div></div></div>';
+      '<div class="inc-row"><span class="inc-lbl">계산 방식</span><span class="unit-mini" title="어시스트=체중에서 입력 무게만큼 덜어줌">'+
+        '<button data-act="setMode" data-ei="'+ei+'" data-m="weight" class="'+(!isAssist(en)?"on":"")+'">일반</button>'+
+        '<button data-act="setMode" data-ei="'+ei+'" data-m="assist" class="'+(isAssist(en)?"on":"")+'">어시스트</button>'+
+      '</span>'+(isAssist(en)?'<span class="inc-lbl">체중 '+fmt(fromKg(+settings.bodyweightKg||70,en.unit))+en.unit+' − 입력</span>':'')+'</div>'+
+      '<div class="setgrid set-head"><div></div><div>'+(isAssist(en)?'어시스트':'무게')+'('+esc(en.unit)+')</div><div></div><div>횟수</div><div>RPE</div><div></div></div>';
     en.sets.forEach(function(st,si){
       var g=el("div",{class:"setgrid"+(st.done?" done":"")});
       g.innerHTML=
@@ -646,30 +665,33 @@
     return wrap;
   }
 
-  // 마지막으로 값이 채워진 세트 기준 추천/PR
+  // 마지막으로 값이 채워진 세트를 분석해 "다음 세트에 8회 이상 가능한" 중량×횟수 추천
   function recForEntry(en){
     var st=null;
-    for(var i=en.sets.length-1;i>=0;i--){var s=en.sets[i];if(s.weight>0&&s.reps>0){st=s;break;}}
+    for(var i=en.sets.length-1;i>=0;i--){var s=en.sets[i];if(+s.reps>0&&(isAssist(en)||+s.weight>0)){st=s;break;}}
     if(!st)return null;
-    var wKg=toKg(st.weight,en.unit);
-    var e1=estimate1RM(wKg,+st.reps,st.rpe!=null?+st.rpe:null);
-    var inc=entryInc(en);  // 이 종목의 증량 단위
+    var loadKg=setKg(en,st);
+    if(loadKg<=0)return null;
+    var e1=estimate1RM(loadKg,+st.reps,st.rpe!=null?+st.rpe:null);
+    var inc=detectInc(en);  // 입력 데이터로 이 종목의 증량 단위를 추론
     var exObj=findEx(en.exercise);var prev=exObj?exObj.best1RM:0;
-    if(e1>prev*1.001 && prev>0 && +st.reps<=12){
+    // PR (일반 종목만; 어시스트는 강도 방향이 반대라 생략)
+    if(!isAssist(en) && e1>prev*1.001 && prev>0 && +st.reps<=12){
       var attempt=roundInc(fromKg(e1*pctFromRepsRPE(3,9),en.unit),inc);
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
-    // 추천: 직전 세트 8회 이상이면 동일 무게 유지, 8회 미만이면 8회 가능 무게로 감량
-    var lastReps=+st.reps, curW=+st.weight, e1disp=fmt(fromKg(e1,en.unit))+en.unit;
-    if(lastReps>=8){
-      return {pr:false,html:'<span class="em">💡</span><div>다음 세트: 동일 무게 <b>'+fmt(curW)+en.unit+' 유지</b> '+
-        '<span class="faint">(8회 이상 목표 · 추정 1RM '+e1disp+')</span></div>'};
+    // 8회를 목표 강도(RPE 8)로 낼 수 있는 유효부하 → 직전 세트 피로만큼 하향
+    var recEffKg=e1*pctFromRepsRPE(8,TARGET_RPE)*FATIGUE_FACTOR;
+    var dispW;
+    if(isAssist(en)){
+      var bw=+settings.bodyweightKg||70;
+      dispW=roundInc(fromKg(Math.max(0,bw-recEffKg),en.unit),inc);  // 필요한 어시스트(체중−유효부하)
+    }else{
+      dispW=roundInc(fromKg(recEffKg,en.unit),inc);
     }
-    var dropW=recommendNextSet(e1,8,en.unit,inc).weight;
-    if(dropW>=curW)dropW=roundInc(curW-inc,inc);
-    return {pr:false,html:'<span class="em">💡</span><div>다음 세트: <b>'+fmt(dropW)+en.unit+' × 8회</b>로 낮추기 '+
-      '<span class="faint">(직전 '+lastReps+'회 · 추정 1RM '+e1disp+')</span></div>'};
+    return {pr:false,html:'<span class="em">💡</span><div>다음 세트 추천: <b>'+fmt(dispW)+en.unit+' × 8회</b>'+
+      (isAssist(en)?' <span class="faint">(어시스트)</span>':'')+'</div>'};
   }
 
   // 이벤트 위임 (오늘 뷰)
@@ -679,8 +701,9 @@
     if(act==="setUnit"){var nu=t.getAttribute("data-u");var en=active.entries[ei];if(nu!==en.unit){
         // 종목 단위 변경: 실제 무게가 유지되도록 값 변환 후 단위 증량 단위로 반올림
         en.sets.forEach(function(s){if(s.weight!==""&&s.weight!=null&&!isNaN(s.weight)&&+s.weight>0){s.weight=roundToUnit(fromKg(toKg(s.weight,en.unit),nu),nu);}});
-        en.unit=nu;en.inc=incDefault(nu);persistActive();renderToday();}}  // 단위 바뀌면 증량 단위도 기본값으로
-    else if(act==="setInc"){active.entries[ei].inc=+t.getAttribute("data-inc");persistActive();renderToday();}
+        en.unit=nu;persistActive();renderToday();}}
+    else if(act==="setMode"){var en2=active.entries[ei];en2.mode=t.getAttribute("data-m");
+        var ex2=findEx(en2.exercise);if(ex2){ex2.mode=en2.mode;save(K.exercises,exercises);}persistActive();renderToday();}
     else if(act==="addSet"){var last=active.entries[ei].sets.slice(-1)[0]||{weight:"",reps:"",rpe:null};
       active.entries[ei].sets.push({weight:last.weight,reps:last.reps,rpe:null});persistActive();renderToday();}
     else if(act==="rmSet"){var si=+t.getAttribute("data-si");active.entries[ei].sets.splice(si,1);
@@ -734,19 +757,23 @@
     if(preItems&&preItems.length){preItems.forEach(function(it){
       var last=lastRecord(it.exercise);
       var unit=last?last.unit:(settings.unit||"kg");
+      var ex=ensureEx(it.exercise,it.bodyPart);
+      var mode=ex.mode||(last&&last.mode)||(assistDefault(it.exercise)?"assist":"weight");
+      ex.mode=mode;
       var sets=[];var n=Math.max(1,it.targetSets||1);
       for(var i=0;i<n;i++)sets.push({weight:last?last.set.weight:"",reps:last?last.set.reps:(it.targetReps||""),rpe:null});
-      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,memo:last?last.memo:"",inc:(last&&last.inc>0)?last.inc:incDefault(unit),sets:sets});
-    });}
+      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,mode:mode,memo:last?last.memo:"",sets:sets});
+    });save(K.exercises,exercises);}
     persistActive();renderToday();
   }
   function endSession(){
     if(!active)return;
     // 완료 체크된 세트만 기록·볼륨에 반영
     var uncheckedCount=0;
-    active.entries.forEach(function(en){en.sets.forEach(function(s){if(!s.done&&s.weight>0&&s.reps>0)uncheckedCount++;});});
-    var kept=active.entries.filter(function(en){return en.sets.some(function(s){return s.done&&s.weight>0&&s.reps>0;});});
-    kept.forEach(function(en){en.sets=en.sets.filter(function(s){return s.done&&s.weight>0&&s.reps>0;});});
+    function realSet(en,s){return +s.reps>0 && (isAssist(en)||+s.weight>0);}  // 어시스트는 무게 0(순수 체중)도 유효
+    active.entries.forEach(function(en){en.sets.forEach(function(s){if(!s.done&&realSet(en,s))uncheckedCount++;});});
+    var kept=active.entries.filter(function(en){return en.sets.some(function(s){return s.done&&realSet(en,s);});});
+    kept.forEach(function(en){en.sets=en.sets.filter(function(s){return s.done&&realSet(en,s);});});
     if(kept.length===0){if(confirm("완료 체크한 세트가 없습니다. 운동을 취소할까요?")){active=null;save(K.active,null);if(timerInt){clearInterval(timerInt);timerInt=null;}renderToday();}return;}
     if(uncheckedCount>0 && !confirm("완료 체크 안 한 세트 "+uncheckedCount+"개는 저장되지 않습니다. 종료할까요?"))return;
     var durationSec=active.startTs?Math.floor((Date.now()-active.startTs)/1000):0;
@@ -754,8 +781,8 @@
     kept.forEach(function(en){
       var exo=ensureEx(en.exercise,en.bodyPart);var bestE1=exo.best1RM;
       en.sets.forEach(function(s){
-        volKg+=toKg(s.weight,en.unit)*(+s.reps);
-        var e1=estimate1RM(toKg(s.weight,en.unit),+s.reps,s.rpe!=null?+s.rpe:null);
+        volKg+=setKg(en,s)*(+s.reps);
+        var e1=estimate1RM(setKg(en,s),+s.reps,s.rpe!=null?+s.rpe:null);
         if(e1>bestE1)bestE1=e1;
       });
       if(bestE1>exo.best1RM*1.001){if(exo.best1RM>0)prs.push({name:en.exercise,e1:bestE1,prev:exo.best1RM,unit:en.unit});exo.best1RM=bestE1;}
@@ -887,8 +914,8 @@
     // 종목별 행
     sess.entries.forEach(function(en,i){
       var y=rowsTop+i*rowH;
-      var top=en.sets.reduce(function(a,b){return toKg(b.weight,en.unit)>toKg(a.weight,en.unit)?b:a;},en.sets[0]);
-      var evol=0;en.sets.forEach(function(s){evol+=toKg(s.weight,en.unit)*(+s.reps);});
+      var top=en.sets.reduce(function(a,b){return setKg(en,b)>setKg(en,a)?b:a;},en.sets[0]);
+      var evol=0;en.sets.forEach(function(s){evol+=setKg(en,s)*(+s.reps);});
       P.push('<circle cx="46" cy="'+(y-5)+'" r="4" fill="#3b82f6"/>');
       P.push('<text x="60" y="'+y+'" font-family="'+FF+'" font-size="16" font-weight="600" fill="#14171A">'+esc(en.exercise)+'</text>');
       P.push('<text x="680" y="'+y+'" text-anchor="end" font-family="'+FM+'" font-size="13" fill="#6b7280">'+en.sets.length+'세트 · 최고 '+esc(fmt(top.weight)+en.unit+"×"+top.reps)+' · '+esc(fmt(evol))+'kg</text>');
@@ -957,7 +984,7 @@
       var h=Math.floor(s.durationSec/3600),m=Math.floor(s.durationSec%3600/60);
       var dur=(h>0?h+"시간 ":"")+m+"분";
       var lis=s.entries.map(function(en){
-        var top=en.sets.reduce(function(a,b){return toKg(b.weight,en.unit)>toKg(a.weight,en.unit)?b:a;},en.sets[0]);
+        var top=en.sets.reduce(function(a,b){return setKg(en,b)>setKg(en,a)?b:a;},en.sets[0]);
         return '<li><span>'+esc(en.exercise)+' <span class="faint">'+en.sets.length+'세트</span></span><span class="sv">'+fmt(top.weight)+en.unit+'×'+top.reps+'</span></li>';
       }).join("");
       var card=el("div",{class:"card sess-card"},
@@ -978,9 +1005,9 @@
     keys.sort(function(a,b){return names[b].slice(-1)[0].date.localeCompare(names[a].slice(-1)[0].date);});
     keys.forEach(function(name){
       var hist=names[name];var exo=findEx(name);
-      var series=hist.map(function(h){var best=0;h.en.sets.forEach(function(s){var e1=estimate1RM(toKg(s.weight,h.en.unit),+s.reps,s.rpe!=null?+s.rpe:null);if(e1>best)best=e1;});return best;});
+      var series=hist.map(function(h){var best=0;h.en.sets.forEach(function(s){var e1=estimate1RM(setKg(h.en,s),+s.reps,s.rpe!=null?+s.rpe:null);if(e1>best)best=e1;});return best;});
       var last=hist.slice(-1)[0];
-      var top=last.en.sets.reduce(function(a,b){return toKg(b.weight,last.en.unit)>toKg(a.weight,last.en.unit)?b:a;},last.en.sets[0]);
+      var top=last.en.sets.reduce(function(a,b){return setKg(last.en,b)>setKg(last.en,a)?b:a;},last.en.sets[0]);
       var card=el("div",{class:"card"},
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><b>'+esc(name)+'</b>'+
         '<span class="badge">'+esc(bodyPartFor(name))+'</span></div>'+
@@ -1005,7 +1032,7 @@
   function recomputeBests(){
     exercises.forEach(function(e){e.best1RM=0;});
     sessions.forEach(function(s){s.entries.forEach(function(en){var exo=ensureEx(en.exercise,en.bodyPart);
-      en.sets.forEach(function(st){var e1=estimate1RM(toKg(st.weight,en.unit),+st.reps,st.rpe!=null?+st.rpe:null);if(e1>exo.best1RM)exo.best1RM=e1;});});});
+      en.sets.forEach(function(st){var e1=estimate1RM(setKg(en,st),+st.reps,st.rpe!=null?+st.rpe:null);if(e1>exo.best1RM)exo.best1RM=e1;});});});
     save(K.exercises,exercises);
   }
 
@@ -1014,9 +1041,9 @@
   function openExerciseHistory(name){
     var hist=[];  // {date, en} 최신순
     for(var i=sessions.length-1;i>=0;i--){var s=sessions[i];s.entries.forEach(function(en){if(en.exercise===name)hist.push({date:s.date,en:en});});}
-    function e1e(en){var b=0;en.sets.forEach(function(st){var v=estimate1RM(toKg(st.weight,en.unit),+st.reps,st.rpe!=null?+st.rpe:null);if(v>b)b=v;});return b;}
-    function volE(en){var v=0;en.sets.forEach(function(st){v+=toKg(st.weight,en.unit)*(+st.reps);});return v;}
-    function maxW(en){var m=0;en.sets.forEach(function(st){var w=toKg(st.weight,en.unit);if(w>m)m=w;});return m;}
+    function e1e(en){var b=0;en.sets.forEach(function(st){var v=estimate1RM(setKg(en,st),+st.reps,st.rpe!=null?+st.rpe:null);if(v>b)b=v;});return b;}
+    function volE(en){var v=0;en.sets.forEach(function(st){v+=setKg(en,st)*(+st.reps);});return v;}
+    function maxW(en){var m=0;en.sets.forEach(function(st){var w=setKg(en,st);if(w>m)m=w;});return m;}
     function koDate(iso){var p=iso.split("-");return +p[0]+"년 "+(+p[1])+"월 "+(+p[2])+"일";}
     var head='<h3 style="margin-bottom:2px">'+esc(name)+'</h3><p class="sub" style="margin-bottom:12px">'+esc(bodyPartFor(name))+'</p>';
     if(!hist.length){openSheet(head+'<div class="empty muted" style="padding:20px">아직 기록이 없습니다</div><button class="btn primary block" id="hClose">닫기</button>');$("#hClose").onclick=closeSheet;return;}
@@ -1227,7 +1254,7 @@
     var b=weekBounds(offset);var parts={};var total=0,sessCount=0,durSec=0;
     sessions.forEach(function(s){
       if(s.date>=b.startISO&&s.date<=b.endISO){sessCount++;durSec+=s.durationSec||0;
-        s.entries.forEach(function(en){en.sets.forEach(function(st){var v=toKg(st.weight,en.unit)*(+st.reps);parts[en.bodyPart]=(parts[en.bodyPart]||0)+v;total+=v;});});}
+        s.entries.forEach(function(en){en.sets.forEach(function(st){var v=setKg(en,st)*(+st.reps);parts[en.bodyPart]=(parts[en.bodyPart]||0)+v;total+=v;});});}
     });
     return {parts:parts,total:total,sessions:sessCount,durSec:durSec,bounds:b};
   }
@@ -1235,7 +1262,7 @@
   function weekDayData(offset){
     var b=weekBounds(offset),start=new Date(b.startISO+"T00:00:00"),days=[];
     for(var i=0;i<7;i++){var d=new Date(start);d.setDate(start.getDate()+i);var iso=todayISO(d);
-      var vol=0,ents=[];sessions.forEach(function(s){if(s.date===iso){s.entries.forEach(function(en){var ev=0;en.sets.forEach(function(st){ev+=toKg(st.weight,en.unit)*(+st.reps);});vol+=ev;ents.push({exercise:en.exercise,bodyPart:en.bodyPart,vol:ev});});}});
+      var vol=0,ents=[];sessions.forEach(function(s){if(s.date===iso){s.entries.forEach(function(en){var ev=0;en.sets.forEach(function(st){ev+=setKg(en,st)*(+st.reps);});vol+=ev;ents.push({exercise:en.exercise,bodyPart:en.bodyPart,vol:ev});});}});
       days.push({iso:iso,vol:vol,ents:ents});}
     return days;
   }
@@ -1320,7 +1347,7 @@
   }
   function weekPRs(b){
     var beforeBest={},weekBest={};
-    sessions.forEach(function(s){s.entries.forEach(function(en){var be=0;en.sets.forEach(function(st){var e1=estimate1RM(toKg(st.weight,en.unit),+st.reps,st.rpe!=null?+st.rpe:null);if(e1>be)be=e1;});
+    sessions.forEach(function(s){s.entries.forEach(function(en){var be=0;en.sets.forEach(function(st){var e1=estimate1RM(setKg(en,st),+st.reps,st.rpe!=null?+st.rpe:null);if(e1>be)be=e1;});
       if(s.date<b.startISO){if(be>(beforeBest[en.exercise]||0))beforeBest[en.exercise]=be;}
       else if(s.date>=b.startISO&&s.date<=b.endISO){if(be>(weekBest[en.exercise]||0))weekBest[en.exercise]=be;}});});
     var out=[];for(var k in weekBest){if(weekBest[k]>(beforeBest[k]||0)*1.001)out.push({name:k,e1:weekBest[k]});}
@@ -1332,7 +1359,7 @@
     var ss=sessions.filter(function(s){return s.date===iso;});
     if(!ss.length)return '<div class="daydetail muted" style="text-align:center;font-size:13px">이 날은 운동 기록이 없어요</div>';
     var total=0,dur=0,rows='';
-    ss.forEach(function(s){dur+=s.durationSec||0;s.entries.forEach(function(en){var ev=0;en.sets.forEach(function(st){ev+=toKg(st.weight,en.unit)*(+st.reps);});total+=ev;
+    ss.forEach(function(s){dur+=s.durationSec||0;s.entries.forEach(function(en){var ev=0;en.sets.forEach(function(st){ev+=setKg(en,st)*(+st.reps);});total+=ev;
       rows+='<div class="dd-row"><span>'+esc(en.exercise)+' <span class="faint" style="font-size:11px">'+esc(en.bodyPart)+'</span></span><span class="mono faint">'+en.sets.length+'세트 · '+fmt(fromKg(ev,settings.unit))+settings.unit+'</span></div>';});});
     return '<div class="daydetail"><div class="dd-head">'+iso.slice(5).replace("-","/")+' · <b>'+fmt(fromKg(total,settings.unit))+settings.unit+'</b> · '+Math.round(dur/60)+'분</div>'+rows+'</div>';
   }
