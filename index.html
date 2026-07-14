@@ -418,6 +418,8 @@
   function setKg(en,st){var w=toKg(st.weight,en.unit);
     if(isAssist(en)){var bw=+settings.bodyweightKg||70;return Math.max(0,bw-w);}return w;}
   var FATIGUE_FACTOR=0.95;  // 직전 세트 피로 반영(다음 세트 추천 무게를 약간 하향)
+  // 부위별 목표 반복 범위: 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 12~16 고반복
+  function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:12,hi:16}:{lo:8,hi:12};}
 
 /* ============================================================
    추천/1RM 계산
@@ -584,9 +586,13 @@
       $$(wkCard,".wk-day[data-iso]").forEach(function(c){c.onclick=function(){homeSelIso=c.getAttribute("data-iso");renderToday();};});
       var dowLbl=WEEKDAYS[(new Date(selIso+"T00:00:00").getDay()+6)%7];
       if(hasWk(selIso)){
-        var dc=el("div",{class:"card"},'<div class="sectitle">진행한 운동</div>');
+        var dc=el("div",{class:"card"},'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px"><div class="sectitle" style="margin:0">진행한 운동</div><button class="btn sm ghost" id="saveDayRoutine">＋ 루틴으로 저장</button></div>');
         dc.insertAdjacentHTML("beforeend",dayDetailHTML(selIso));
         v.appendChild(dc);
+        $("#saveDayRoutine",dc).onclick=function(){
+          var ents=[];sessions.forEach(function(s){if(s.date===selIso)s.entries.forEach(function(en){ents.push(en);});});
+          saveEntriesAsRoutine(ents,commonBodyPart(ents),selIso.slice(5).replace("-","/")+" 운동을 루틴으로 저장합니다");
+        };
       }else{
         v.appendChild(el("div",{class:"card"},'<div class="muted" style="font-size:13px;text-align:center;padding:6px">'+selIso.slice(5).replace("-","/")+' ('+dowLbl+') · 운동 기록이 없어요</div>'));
       }
@@ -682,16 +688,16 @@
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
-    // 8회를 목표 강도(RPE 8)로 낼 수 있는 유효부하 → 직전 세트 피로만큼 하향
-    var recEffKg=e1*pctFromRepsRPE(8,TARGET_RPE)*FATIGUE_FACTOR;
-    var dispW;
-    if(isAssist(en)){
-      var bw=+settings.bodyweightKg||70;
-      dispW=roundInc(fromKg(Math.max(0,bw-recEffKg),en.unit),inc);  // 필요한 어시스트(체중−유효부하)
+    // 부위별 목표 반복 범위. 직전 세트가 하한 이상이면 무게 유지, 미달이면 하한회수 가능한 무게로 하향.
+    var rr=repRangeFor(en.bodyPart), lastReps=+st.reps, repText=rr.lo+'~'+rr.hi+'회', dispW;
+    if(lastReps>=rr.lo){
+      dispW=+st.weight;   // 목표 범위 이상 → 내릴 이유 없음, 같은 무게 유지(어시스트도 동일)
     }else{
-      dispW=roundInc(fromKg(recEffKg,en.unit),inc);
+      var recEffKg=e1*pctFromRepsRPE(rr.lo,TARGET_RPE)*FATIGUE_FACTOR;  // 하한회수를 RPE8로 낼 유효부하
+      dispW=isAssist(en)?roundInc(fromKg(Math.max(0,(+settings.bodyweightKg||70)-recEffKg),en.unit),inc)
+                        :roundInc(fromKg(recEffKg,en.unit),inc);
     }
-    return {pr:false,html:'<span class="em">💡</span><div>다음 세트 추천: <b>'+fmt(dispW)+en.unit+' × 8회</b>'+
+    return {pr:false,html:'<span class="em">💡</span><div>다음 세트 추천: <b>'+fmt(dispW)+en.unit+' × '+repText+'</b>'+
       (isAssist(en)?' <span class="faint">(어시스트)</span>':'')+'</div>'};
   }
 
@@ -1149,12 +1155,17 @@
 
   function openSaveRoutine(){
     if(!active||!active.entries.length){toast("종목을 먼저 추가하세요");return;}
-    openSheet('<h3>루틴으로 저장</h3><p class="sub">현재 종목 구성을 루틴으로 저장합니다</p>'+
-      '<label class="fl">루틴 이름</label><input id="rName" placeholder="예: 가슴의 날" style="margin-bottom:14px">'+
-      '<div class="muted mono" style="font-size:13px;margin-bottom:16px">'+active.entries.map(function(e){return esc(e.exercise);}).join(" · ")+'</div>'+
+    saveEntriesAsRoutine(active.entries,"","현재 종목 구성을 루틴으로 저장합니다");
+  }
+  // 주어진 entries(진행 중 세션 또는 과거 세션)를 루틴으로 저장하는 시트
+  function saveEntriesAsRoutine(entries,defName,sub){
+    if(!entries||!entries.length){toast("저장할 종목이 없습니다");return;}
+    openSheet('<h3>루틴으로 저장</h3><p class="sub">'+esc(sub||"종목 구성을 루틴으로 저장합니다")+'</p>'+
+      '<label class="fl">루틴 이름</label><input id="rName" placeholder="예: 가슴의 날" value="'+esc(defName||"")+'" style="margin-bottom:14px">'+
+      '<div class="muted" style="font-size:13px;margin-bottom:16px">'+entries.map(function(e){return esc(e.exercise);}).join(" · ")+'</div>'+
       '<button class="btn primary block" id="rSave">저장</button>');
     $("#rSave").onclick=function(){var nm=$("#rName").value.trim();if(!nm){toast("이름을 입력하세요");return;}
-      var items=active.entries.map(function(e){return {exercise:e.exercise,bodyPart:e.bodyPart,targetSets:e.sets.length,targetReps:(e.sets[0]&&e.sets[0].reps)||""};});
+      var items=entries.map(function(e){return {exercise:e.exercise,bodyPart:e.bodyPart,targetSets:e.sets.length,targetReps:(e.sets[0]&&e.sets[0].reps)||""};});
       routines.push({id:uid("r"),name:nm,bodyPart:commonBodyPart(items),items:items});save(K.routines,routines);
       closeSheet();toast("루틴 저장됨");};
   }
@@ -1462,10 +1473,22 @@
   var sheetLocked=false;  // true면 바깥 터치로 안 닫힘(데이터 유실 방지)
   var scrimClose=null;    // 설정되면 바깥 터치 시 이 함수가 닫기를 처리(변경 확인 등)
   function openSheet(html,locked){var s=$("#sheet");s.innerHTML=html;sheetLocked=!!locked;scrimClose=null;
+    $("#scrim").style.alignItems="";s.style.maxHeight="";s.style.transform="";
     $("#scrim").classList.add("open");document.body.classList.add("noscroll");s.scrollTop=0;}
-  function closeSheet(){sheetLocked=false;scrimClose=null;$("#scrim").classList.remove("open");document.body.classList.remove("noscroll");}
+  function closeSheet(){sheetLocked=false;scrimClose=null;$("#scrim").classList.remove("open");document.body.classList.remove("noscroll");
+    var s=$("#sheet");if(s){s.style.maxHeight="";s.style.transform="";}$("#scrim").style.alignItems="";}
   $("#scrim").addEventListener("click",function(e){if(e.target!==this)return;   // 시트 바깥(공백)만
     if(scrimClose)scrimClose();else if(!sheetLocked)closeSheet();});
+  // 키보드가 입력창을 가리지 않도록: 포커스 시 화면 안으로 스크롤 + 시트는 보이는 영역에 맞춤
+  document.addEventListener("focusin",function(e){var t=e.target;
+    if(!t||!/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))return;
+    setTimeout(function(){try{t.scrollIntoView({block:"center",behavior:"smooth"});}catch(_){}} ,260);});
+  if(window.visualViewport){var vv=window.visualViewport;
+    var fitSheetToKb=function(){var sc=$("#scrim");if(!sc)return;var s=$("#sheet");
+      var kb=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
+      if(sc.classList.contains("open")&&kb>90){sc.style.alignItems="flex-start";if(s)s.style.maxHeight=(vv.height-10)+"px";}
+      else{sc.style.alignItems="";if(s)s.style.maxHeight="";}};
+    vv.addEventListener("resize",fitSheetToKb);vv.addEventListener("scroll",fitSheetToKb);}
 
   function openMenu(){
     openSheet('<h3>메뉴</h3><p class="sub">설정 · 데이터 백업 · 정보</p>'+
