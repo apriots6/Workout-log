@@ -688,8 +688,9 @@
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
-    // 부위별 목표 반복 범위. 직전 세트가 하한 이상이면 무게 유지, 미달이면 하한회수 가능한 무게로 하향.
-    var rr=repRangeFor(en.bodyPart), lastReps=+st.reps, repText=rr.lo+'~'+rr.hi+'회', dispW;
+    // 부위별 목표 반복 범위. 추천 횟수는 범위의 하한 = 그 범위에서 가장 무거운 무게가 나오는 지점.
+    // 직전 세트가 하한 이상이면 무게 유지, 미달이면 하한회수 가능한 무게로 하향.
+    var rr=repRangeFor(en.bodyPart), lastReps=+st.reps, repText=rr.lo+'회', dispW;
     if(lastReps>=rr.lo){
       dispW=+st.weight;   // 목표 범위 이상 → 내릴 이유 없음, 같은 무게 유지(어시스트도 동일)
     }else{
