@@ -345,7 +345,6 @@
     12:{10:68.0,9.5:66.7,9:65.3,8.5:64.0,8:62.6,7.5:61.3,7:59.9,6.5:58.6,6:57.3}
   };
 
-  var TARGET_RPE=8;       // 근비대 기본 목표 강도(RIR 2)
   var LB_PER_KG=2.20462;
 
   // 근육 도식 색상 · 회복 모델
@@ -427,7 +426,7 @@
   function assistDefault(name){return /어시스트|assist|assisted/i.test(name||"");}
   function setKg(en,st){var w=toKg(st.weight,en.unit);
     if(isAssist(en)){var bw=+settings.bodyweightKg||70;return Math.max(0,bw-w);}return w;}
-  var FATIGUE_FACTOR=0.95;  // 직전 세트 피로 반영(다음 세트 추천 무게를 약간 하향)
+  var FATIGUE_FACTOR=0.97;  // 다음 세트는 피로 누적 → 추정 1RM을 약간 낮춰서 예측(세트 간 횟수 하락 반영)
   // 부위별 목표 반복 범위: 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 10~18 고반복
   function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:10,hi:18}:{lo:8,hi:12};}
 
@@ -443,6 +442,18 @@
   function estimate1RM(weightKg,reps,rpe){
     if(rpe!=null && reps<=12 && reps>=1){return weightKg/pctFromRepsRPE(reps,rpe);}
     return weightKg*(1+reps/30); // Epley 폴백
+  }
+  // 추정 1RM과 무게로 "그 무게로 몇 회까지 가능한가"(실패 지점) 역산.
+  //   RPE_CHART의 RPE10 열이 곧 실패 지점 %1RM → 구간 보간. 12회보다 가벼우면 Epley 역산.
+  function repsAtWeight(e1Kg,wKg){
+    if(!(e1Kg>0)||!(wKg>0))return 0;
+    var p=wKg/e1Kg;
+    if(p>=RPE_CHART[1][10]/100)return 1;
+    for(var r=1;r<12;r++){
+      var hi=RPE_CHART[r][10]/100, lo=RPE_CHART[r+1][10]/100;
+      if(p<=hi&&p>=lo)return Math.max(1,Math.round(r+(hi-p)/(hi-lo)));
+    }
+    return Math.max(1,Math.round(30*(e1Kg/wKg-1)));
   }
 
 /* ============================================================
@@ -682,14 +693,20 @@
     return wrap;
   }
 
-  // 마지막으로 값이 채워진 세트를 분석해 "다음 세트에 8회 이상 가능한" 중량×횟수 추천
+  // 완료한 마지막 세트(+RPE)로 추정 1RM을 내고, 피로를 반영해 다음 세트의 중량×횟수를 예측
   function recForEntry(en){
-    var st=null;
-    for(var i=en.sets.length-1;i>=0;i--){var s=en.sets[i];if(+s.reps>0&&(isAssist(en)||+s.weight>0)){st=s;break;}}
+    // 기준 세트: 완료 체크한 마지막 세트. 없으면 값이 채워진 마지막 세트.
+    var st=null,fb=null;
+    for(var i=en.sets.length-1;i>=0;i--){var s=en.sets[i];
+      if(!(+s.reps>0&&(isAssist(en)||+s.weight>0)))continue;
+      if(!fb)fb=s;
+      if(s.done){st=s;break;}
+    }
+    st=st||fb;
     if(!st)return null;
     var loadKg=setKg(en,st);
     if(loadKg<=0)return null;
-    var e1=estimate1RM(loadKg,+st.reps,st.rpe!=null?+st.rpe:null);
+    var e1=estimate1RM(loadKg,+st.reps,st.rpe!=null?+st.rpe:null);   // RPE 있으면 차트, 없으면 Epley
     var inc=detectInc(en);  // 입력 데이터로 이 종목의 증량 단위를 추론
     var exObj=findEx(en.exercise);var prev=exObj?exObj.best1RM:0;
     // PR (일반 종목만; 어시스트는 강도 방향이 반대라 생략)
@@ -698,17 +715,23 @@
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
-    // 부위별 목표 반복 범위. 추천 횟수는 범위의 하한 = 그 범위에서 가장 무거운 무게가 나오는 지점.
-    // 직전 세트가 하한 이상이면 무게 유지, 미달이면 하한회수 가능한 무게로 하향.
-    var rr=repRangeFor(en.bodyPart), lastReps=+st.reps, repText=rr.lo+'회', dispW;
-    if(lastReps>=rr.lo){
-      dispW=+st.weight;   // 목표 범위 이상 → 내릴 이유 없음, 같은 무게 유지(어시스트도 동일)
-    }else{
-      var recEffKg=e1*pctFromRepsRPE(rr.lo,TARGET_RPE)*FATIGUE_FACTOR;  // 하한회수를 RPE8로 낼 유효부하
-      dispW=isAssist(en)?roundInc(fromKg(Math.max(0,(+settings.bodyweightKg||70)-recEffKg),en.unit),inc)
-                        :roundInc(fromKg(recEffKg,en.unit),inc);
+    var rr=repRangeFor(en.bodyPart), bw=+settings.bodyweightKg||70;
+    var e1f=e1*FATIGUE_FACTOR;                       // 다음 세트의 (피로 반영) 능력치
+    var dispW=+st.weight, pred=repsAtWeight(e1f,loadKg);   // 같은 무게로 갈 때 예상 횟수
+    // 목표 하한에 못 미치면 증량 단위 한 칸씩만 완화 (어시스트는 더 걸고, 일반은 내림).
+    // 한 칸 내렸는데 상한을 넘길 만큼 가벼워지면 그 칸은 과하므로 현재 무게를 유지한다.
+    if(pred<rr.lo){
+      for(var k=0;k<20;k++){
+        var next=isAssist(en)?dispW+inc:dispW-inc;
+        if(isAssist(en)){if(toKg(next,en.unit)>=bw)break;}else{if(next<inc)break;}
+        var nPred=repsAtWeight(e1f,isAssist(en)?Math.max(0,bw-toKg(next,en.unit)):toKg(next,en.unit));
+        if(nPred>rr.hi)break;
+        dispW=next;pred=nPred;
+        if(pred>=rr.lo)break;
+      }
     }
-    return {pr:false,html:'<span class="em">💡</span><div>다음 세트 추천: <b>'+fmt(dispW)+en.unit+' × '+repText+'</b>'+
+    var reps=Math.max(1,Math.min(rr.hi,pred));       // 이상적 범위 상한까지만 표시
+    return {pr:false,html:'<span class="em">💡</span><div>다음 세트 추천: <b>'+fmt(dispW)+en.unit+' × '+reps+'회</b>'+
       (isAssist(en)?' <span class="faint">(어시스트)</span>':'')+'</div>'};
   }
 
