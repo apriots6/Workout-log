@@ -352,8 +352,18 @@
   var MUSCLE_BASE="#D9DEE6";   // 운동 안 한 근육(회색, 실루엣보다 약간 진하게)
   var MUSCLE_HI="#E0662A";     // 운동한 근육(러스트)
   // 부위별 완전 회복까지 기준 시간(h) — 큰 근육일수록 오래. 볼륨으로 ±20% 보정.
-  var RECOVERY_HOURS={"가슴":60,"등":72,"어깨":48,"하체":72,"팔":48,"코어":36};
-  var RECOVERY_GROUPS=["가슴","등","어깨","하체","팔","코어"];
+  var RECOVERY_HOURS={"가슴":60,"등":72,"어깨":48,"하체":72,"이두":48,"삼두":48,"코어":36};
+  var RECOVERY_GROUPS=["가슴","등","어깨","하체","이두","삼두","코어"];
+  // 회복도는 팔을 이두/삼두로 나눠 본다 (종목 이름으로 판별, 구분 불가하면 둘 다).
+  var ARM_BI=/컬|바이셉스|biceps|curl/i;
+  var ARM_TRI=/익스텐션|푸시다운|푸쉬다운|트라이셉스|triceps|킥백|스컬|딥스|클로즈\s*그립|extension|pushdown|dip/i;
+  function recGroupsFor(en){
+    if(en.bodyPart!=="팔")return [en.bodyPart];
+    var nm=en.exercise||"",bi=ARM_BI.test(nm),tri=ARM_TRI.test(nm);
+    if(bi&&!tri)return ["이두"];
+    if(tri&&!bi)return ["삼두"];
+    return ["이두","삼두"];
+  }
 
 /* ============================================================
    저장소 (localStorage, 접두어 tl.)
@@ -418,8 +428,8 @@
   function setKg(en,st){var w=toKg(st.weight,en.unit);
     if(isAssist(en)){var bw=+settings.bodyweightKg||70;return Math.max(0,bw-w);}return w;}
   var FATIGUE_FACTOR=0.95;  // 직전 세트 피로 반영(다음 세트 추천 무게를 약간 하향)
-  // 부위별 목표 반복 범위: 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 12~16 고반복
-  function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:12,hi:16}:{lo:8,hi:12};}
+  // 부위별 목표 반복 범위: 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 10~18 고반복
+  function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:10,hi:18}:{lo:8,hi:12};}
 
 /* ============================================================
    추천/1RM 계산
@@ -839,8 +849,8 @@
       p+='<path d="M99,82 C99,104 88,112 76,108 C66,104 65,90 75,84 C84,80 99,80 99,82 Z" fill="'+c('가슴')+'"/>';
       p+='<path d="M101,82 C101,104 112,112 124,108 C134,104 135,90 125,84 C116,80 101,80 101,82 Z" fill="'+c('가슴')+'"/>';
       // 이두
-      p+='<path d="M150,102 C160,104 163,120 160,138 C156,150 149,146 148,134 C147,120 146,106 150,102 Z" fill="'+c('팔')+'"/>';
-      p+='<path d="M50,102 C40,104 37,120 40,138 C44,150 51,146 52,134 C53,120 54,106 50,102 Z" fill="'+c('팔')+'"/>';
+      p+='<path d="M150,102 C160,104 163,120 160,138 C156,150 149,146 148,134 C147,120 146,106 150,102 Z" fill="'+c('이두')+'"/>';
+      p+='<path d="M50,102 C40,104 37,120 40,138 C44,150 51,146 52,134 C53,120 54,106 50,102 Z" fill="'+c('이두')+'"/>';
       // 전완
       p+='<path d="M160,150 C167,158 168,182 163,200 C159,206 154,204 154,196 C155,178 154,158 160,150 Z" fill="'+c('팔')+'"/>';
       p+='<path d="M40,150 C33,158 32,182 37,200 C41,206 46,204 46,196 C45,178 46,158 40,150 Z" fill="'+c('팔')+'"/>';
@@ -862,8 +872,8 @@
       // 척추기립근(허리)
       p+='<path d="M92,180 L108,180 C108,198 106,210 104,216 L96,216 C94,210 92,198 92,180 Z" fill="'+c('등')+'"/>';
       // 삼두
-      p+='<path d="M150,102 C160,104 163,120 160,138 C156,150 149,146 148,134 C147,120 146,106 150,102 Z" fill="'+c('팔')+'"/>';
-      p+='<path d="M50,102 C40,104 37,120 40,138 C44,150 51,146 52,134 C53,120 54,106 50,102 Z" fill="'+c('팔')+'"/>';
+      p+='<path d="M150,102 C160,104 163,120 160,138 C156,150 149,146 148,134 C147,120 146,106 150,102 Z" fill="'+c('삼두')+'"/>';
+      p+='<path d="M50,102 C40,104 37,120 40,138 C44,150 51,146 52,134 C53,120 54,106 50,102 Z" fill="'+c('삼두')+'"/>';
       // 전완
       p+='<path d="M160,150 C167,158 168,182 163,200 C159,206 154,204 154,196 C155,178 154,158 160,150 Z" fill="'+c('팔')+'"/>';
       p+='<path d="M40,150 C33,158 32,182 37,200 C41,206 46,204 46,196 C45,178 46,158 40,150 Z" fill="'+c('팔')+'"/>';
@@ -884,7 +894,8 @@
   function buildSummarySVG(sess,prs){
     var FF="-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Segoe UI',Roboto,sans-serif";
     var FM="'JetBrains Mono','SF Mono',monospace";
-    var groups={};sess.entries.forEach(function(en){groups[en.bodyPart]=true;});
+    var groups={};sess.entries.forEach(function(en){groups[en.bodyPart]=true;   // 도식은 팔을 이두/삼두로 나눠 칠함
+      recGroupsFor(en).forEach(function(g){groups[g]=true;});});
     var cf=function(g){return groups[g]?MUSCLE_HI:MUSCLE_BASE;};
     var parts=BODY_PARTS.filter(function(p){return groups[p];});
     var n=sess.entries.length;
@@ -1131,7 +1142,7 @@
         (r.bodyPart?'<span class="badge accent">'+esc(r.bodyPart)+'</span>':'')+'</div>'+
         '<div class="muted" style="font-size:13px;font-weight:600;margin:8px 0 6px">'+r.items.length+'종목</div>'+
         '<div style="margin-bottom:14px">'+r.items.map(function(it){return '<div style="font-size:14.5px;color:var(--ink);padding:7px 0;border-top:1px solid var(--line-soft)">'+esc(it.exercise)+' <span class="faint" style="font-size:11px;font-weight:500;margin-left:2px">'+esc(it.bodyPart)+'</span></div>';}).join("")+'</div>'+
-        '<div class="btn-row"><button class="btn primary" data-start="'+r.id+'">이 루틴으로 시작</button>'+
+        '<div class="btn-row"><button class="btn primary" data-start="'+r.id+'">시작</button>'+
         '<button class="btn ghost sm" data-edit="'+r.id+'">편집</button>'+
         '<button class="btn danger sm" data-delr="'+r.id+'">삭제</button></div>');
       card.querySelector("[data-start]").onclick=function(){startRoutine(r);};
@@ -1416,16 +1427,37 @@
    근거: 저항운동 후 회복은 보통 24~72h, 큰 근육·고볼륨일수록 오래.
          (개인차·수면·영양 영향 큼 → '추정'으로 표기)
    ============================================================ */
+  // 세션 하나를 부위별 {vol(kg), sets} 로 집계
+  function sessionLoadByGroup(s){
+    var by={};
+    s.entries.forEach(function(en){
+      var v=0;en.sets.forEach(function(st){v+=setKg(en,st)*(+st.reps);});
+      recGroupsFor(en).forEach(function(g){
+        if(!RECOVERY_HOURS[g])return;
+        if(!by[g])by[g]={vol:0,sets:0};
+        by[g].vol+=v;by[g].sets+=en.sets.length;
+      });
+    });
+    return by;
+  }
   function recoveryData(){
     var res={};RECOVERY_GROUPS.forEach(function(g){res[g]=null;});
+    // 부위별 평소 볼륨(평균) — 그날 운동이 평소보다 빡셌는지 판단하는 기준
+    var hist={};
+    sessions.forEach(function(s){var by=sessionLoadByGroup(s);
+      for(var g in by){(hist[g]=hist[g]||[]).push(by[g].vol);}});
+    var avg={};for(var k in hist){avg[k]=hist[k].reduce(function(a,b){return a+b;},0)/hist[k].length;}
     for(var i=sessions.length-1;i>=0;i--){
-      var s=sessions[i],setsByG={};
-      s.entries.forEach(function(en){if(res[en.bodyPart]===null&&RECOVERY_HOURS[en.bodyPart])setsByG[en.bodyPart]=(setsByG[en.bodyPart]||0)+en.sets.length;});
-      for(var g in setsByG){
+      var s=sessions[i],by=sessionLoadByGroup(s);
+      for(var g in by){
+        if(res[g]!==null)continue;   // 이미 더 최근 세션에서 처리됨
         var endTs=s.endTs||new Date(s.date+"T18:00:00").getTime();
         var hoursAgo=Math.max(0,(Date.now()-endTs)/3600000);
-        var req=RECOVERY_HOURS[g]*(0.8+0.4*Math.min(1,setsByG[g]/8));
-        res[g]={pct:Math.max(0,Math.min(100,Math.round(hoursAgo/req*100))),date:s.date,sets:setsByG[g]};
+        // 볼륨 강도 반영: 평소 대비 볼륨이 많을수록 회복에 더 오래 걸림 (0.6~1.6배)
+        var ratio=avg[g]>0?by[g].vol/avg[g]:1;
+        var load=Math.max(0.6,Math.min(1.6,0.6+0.4*ratio));
+        var req=RECOVERY_HOURS[g]*load;
+        res[g]={pct:Math.max(0,Math.min(100,Math.round(hoursAgo/req*100))),date:s.date,sets:by[g].sets,vol:by[g].vol,load:load};
       }
     }
     return res;
@@ -1439,11 +1471,16 @@
   function renderRecovery(){
     var v=$("#view-recovery");v.innerHTML="";
     var rec=recoveryData();
-    var cf=function(g){var r=rec[g];return r?recoveryColor(r.pct):MUSCLE_BASE;};
+    var cf=function(g){
+      if(g==="팔"){  // 전완: 이두/삼두 중 덜 회복된 쪽을 따라감
+        var arr=[rec["이두"],rec["삼두"]].filter(Boolean);
+        return arr.length?recoveryColor(Math.min.apply(null,arr.map(function(x){return x.pct;}))):MUSCLE_BASE;
+      }
+      var r=rec[g];return r?recoveryColor(r.pct):MUSCLE_BASE;};
     var card=el("div",{class:"card"});
     card.innerHTML=
       '<h2 style="margin-bottom:4px">근육 회복도 <span class="badge">추정</span></h2>'+
-      '<div class="muted" style="font-size:13px;margin-bottom:12px">마지막 운동 이후 경과 시간과 부위 크기로 추정해요. <b style="color:#37B24D">초록=회복</b> · <b style="color:#EF5B5B">빨강=피로</b></div>'+
+      '<div class="muted" style="font-size:13px;margin-bottom:12px">마지막 운동 이후 경과 시간 · 부위 크기 · <b>그날 볼륨</b>으로 추정해요. <b style="color:#37B24D">초록=회복</b> · <b style="color:#EF5B5B">빨강=피로</b></div>'+
       '<div class="subtabs" id="recTabs"><button data-s="front" class="'+(recSide==="front"?"on":"")+'">정면</button><button data-s="back" class="'+(recSide==="back"?"on":"")+'">후면</button></div>'+
       '<svg viewBox="0 0 200 466" style="width:100%;max-width:260px;display:block;margin:2px auto 0">'+muscleFigureSVG(0,recSide,cf)+'</svg>';
     v.appendChild(card);
@@ -1455,17 +1492,13 @@
       if(!r)return '<div class="recrow"><span class="recdot" style="background:'+MUSCLE_BASE+'"></span><span class="recname">'+g+'</span><span class="recpct faint">기록 없음</span><span class="recago"></span></div>';
       var col=recoveryColor(r.pct);
       var state=r.pct>=90?"회복 완료":r.pct>=70?"회복 중":"피로";
-      return '<div class="recrow"><span class="recdot" style="background:'+col+'"></span><span class="recname">'+g+' <span class="faint" style="font-weight:500;font-size:12px">'+state+'</span></span>'+
+      var loadLbl=r.load>=1.1?"볼륨 많음":r.load<=0.9?"볼륨 적음":"보통";  // load 1.1 ≈ 평소의 1.25배
+      return '<div class="recrow"><span class="recdot" style="background:'+col+'"></span><span class="recname">'+g+
+        ' <span class="faint" style="font-weight:500;font-size:12px">'+state+' · '+fmt(fromKg(r.vol,settings.unit))+settings.unit+' ('+loadLbl+')</span></span>'+
         '<span class="recpct" style="color:'+col+'">'+r.pct+'%</span><span class="recago faint">'+daysAgoLabel(r.date)+'</span></div>';
     }).join("");
     listCard.innerHTML='<div class="sectitle">부위별 회복</div>'+rows;
     v.appendChild(listCard);
-
-    if(!active){
-      var cta=el("button",{class:"btn primary block"},"이 상태로 운동 시작");
-      cta.onclick=function(){startSession();switchTab("today");};
-      v.appendChild(cta);
-    }
   }
 
 /* ============================================================
