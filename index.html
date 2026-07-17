@@ -88,7 +88,7 @@
   .btn-row .btn{flex:1}
 
   /* inputs */
-  input,select{font-family:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%}
+  input,select{font-family:inherit;font-size:16px;line-height:1.3;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%}
   input:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
   input.num{font-family:var(--mono);text-align:center;padding:11px 6px}
   label.fl{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin:0 0 6px}
@@ -173,6 +173,10 @@
   .exrow .exn{font-weight:600;font-size:16px}
   .exrow .exbp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);flex:none}
   .exrow.addnew .exn{color:var(--accent-ink)}
+  .swipe-wrap{position:relative;overflow:hidden;border-bottom:1px solid var(--line-soft)}
+  .swipe-wrap .exrow{border-bottom:none;background:var(--card);transition:transform .18s ease;touch-action:pan-y}
+  .swipe-wrap.dragging .exrow{transition:none}
+  .swipe-del{position:absolute;top:0;right:0;height:100%;width:84px;border:none;background:#EF5B5B;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
 
   /* drag-to-reorder */
   .drag-handle{flex:none;cursor:grab;color:var(--ink-faint);font-size:17px;line-height:1;padding:8px 5px;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -427,8 +431,9 @@
   function setKg(en,st){var w=toKg(st.weight,en.unit);
     if(isAssist(en)){var bw=+settings.bodyweightKg||70;return Math.max(0,bw-w);}return w;}
   var FATIGUE_FACTOR=0.97;  // 다음 세트는 피로 누적 → 추정 1RM을 약간 낮춰서 예측(세트 간 횟수 하락 반영)
-  // 부위별 목표 반복 범위: 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 10~18 고반복
-  function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:10,hi:18}:{lo:8,hi:12};}
+  // 부위별 목표 반복 범위 (RP Strength 자료 기반): 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 10~15
+  function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:10,hi:15}:{lo:8,hi:12};}
+  function isSmallMuscle(bodyPart){return bodyPart==="어깨"||bodyPart==="팔";}
 
 /* ============================================================
    추천/1RM 계산
@@ -709,25 +714,28 @@
     var e1=estimate1RM(loadKg,+st.reps,st.rpe!=null?+st.rpe:null);   // RPE 있으면 차트, 없으면 Epley
     var inc=detectInc(en);  // 입력 데이터로 이 종목의 증량 단위를 추론
     var exObj=findEx(en.exercise);var prev=exObj?exObj.best1RM:0;
-    // PR (일반 종목만; 어시스트는 강도 방향이 반대라 생략)
-    if(!isAssist(en) && e1>prev*1.001 && prev>0 && +st.reps<=12){
+    var rr=repRangeFor(en.bodyPart), bw=+settings.bodyweightKg||70;
+    // PR(1RM 갱신 도전)은 대근육만. 소근육(어깨/팔)은 고반복이 목표라 무거운 3회 도전이 부적합.
+    if(!isAssist(en) && !isSmallMuscle(en.bodyPart) && e1>prev*1.001 && prev>0 && +st.reps<=12){
       var attempt=roundInc(fromKg(e1*pctFromRepsRPE(3,9),en.unit),inc);
       return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
         ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
     }
-    var rr=repRangeFor(en.bodyPart), bw=+settings.bodyweightKg||70;
     var e1f=e1*FATIGUE_FACTOR;                       // 다음 세트의 (피로 반영) 능력치
-    var dispW=+st.weight, pred=repsAtWeight(e1f,loadKg);   // 같은 무게로 갈 때 예상 횟수
-    // 목표 하한에 못 미치면 증량 단위 한 칸씩만 완화 (어시스트는 더 걸고, 일반은 내림).
-    // 한 칸 내렸는데 상한을 넘길 만큼 가벼워지면 그 칸은 과하므로 현재 무게를 유지한다.
-    if(pred<rr.lo){
-      for(var k=0;k<20;k++){
-        var next=isAssist(en)?dispW+inc:dispW-inc;
-        if(isAssist(en)){if(toKg(next,en.unit)>=bw)break;}else{if(next<inc)break;}
-        var nPred=repsAtWeight(e1f,isAssist(en)?Math.max(0,bw-toKg(next,en.unit)):toKg(next,en.unit));
-        if(nPred>rr.hi)break;
-        dispW=next;pred=nPred;
-        if(pred>=rr.lo)break;
+    function loadAt(w){return isAssist(en)?Math.max(0,bw-toKg(w,en.unit)):toKg(w,en.unit);} // 표시무게→유효부하
+    function rdist(r){return r<rr.lo?rr.lo-r:(r>rr.hi?r-rr.hi:0);}   // 목표 범위와의 거리
+    var dispW=+st.weight, pred=repsAtWeight(e1f,loadAt(dispW));
+    // 예상 횟수가 범위 밖이면 증량 단위 한 칸씩 조정해 범위에 더 가깝게. 더 가까워지지 않으면 멈춤.
+    if(rdist(pred)>0){
+      var dir=(pred>rr.hi)?(isAssist(en)?-1:1):(isAssist(en)?1:-1); // 쉬움→무게↑(어시스트 보조↓), 어려움→무게↓(어시스트 보조↑)
+      for(var k=0;k<60;k++){
+        var w2=dispW+dir*inc;
+        if(w2<(isAssist(en)?0:inc))break;
+        if(isAssist(en)&&toKg(w2,en.unit)>=bw)break;   // 보조가 체중 이상이면 의미 없음
+        var p2=repsAtWeight(e1f,loadAt(w2));
+        if(rdist(p2)>=rdist(pred))break;               // 더 가까워지지 않으면 유지
+        dispW=w2;pred=p2;
+        if(rdist(pred)===0)break;
       }
     }
     var reps=Math.max(1,Math.min(rr.hi,pred));       // 이상적 범위 상한까지만 표시
@@ -829,10 +837,21 @@
       if(bestE1>exo.best1RM*1.001){if(exo.best1RM>0)prs.push({name:en.exercise,e1:bestE1,prev:exo.best1RM,unit:en.unit});exo.best1RM=bestE1;}
     });
     var sess={id:active.id,date:active.date,startTs:active.startTs,endTs:Date.now(),durationSec:durationSec,entries:kept,totalVolume:volKg};
+    var rid=active.routineId;
     sessions.push(sess);save(K.sessions,sessions);save(K.exercises,exercises);
     active=null;save(K.active,null);
     if(timerInt){clearInterval(timerInt);timerInt=null;}
     renderToday();
+    // 루틴에서 시작했고 구성이 달라졌으면 덮어쓰기 제안
+    if(rid){
+      var rt=null;for(var ri=0;ri<routines.length;ri++)if(routines[ri].id===rid){rt=routines[ri];break;}
+      if(rt){
+        var cur=kept.map(function(en){return {exercise:en.exercise,bodyPart:en.bodyPart,targetSets:en.sets.length,targetReps:(en.sets[0]&&en.sets[0].reps)||""};});
+        if(routineItemsDiffer(rt.items,cur)&&confirm("'"+rt.name+"' 루틴과 달라진 점이 있어요. 이번 운동 구성으로 루틴을 업데이트할까요?")){
+          rt.items=cur;rt.bodyPart=commonBodyPart(cur);save(K.routines,routines);toast("루틴 업데이트됨");
+        }
+      }
+    }
     showSummary(sess,prs);
   }
 
@@ -1177,7 +1196,18 @@
 
   function startRoutine(r){
     if(active&&!confirm("진행 중인 운동이 있습니다. 새 루틴으로 다시 시작할까요?"))return;
-    startSession(r.items);switchTab("today");toast(r.name+" 시작");
+    startSession(r.items);
+    if(active){active.routineId=r.id;active.routineName=r.name;persistActive();}  // 종료 시 루틴 업데이트 제안용
+    switchTab("today");toast(r.name+" 시작");
+  }
+  // 루틴 items 와 현재 종목 구성이 달라졌는지 (종목 목록/순서 또는 세트 수)
+  function routineItemsDiffer(a,b){
+    if(a.length!==b.length)return true;
+    for(var i=0;i<a.length;i++){
+      if(a[i].exercise!==b[i].exercise)return true;
+      if((+a[i].targetSets||0)!==(+b[i].targetSets||0))return true;
+    }
+    return false;
   }
   function openRoutinePicker(){
     if(!routines.length){toast("저장된 루틴이 없습니다");switchTab("routines");return;}
@@ -1206,6 +1236,42 @@
   }
   function commonBodyPart(items){var c={};items.forEach(function(i){c[i.bodyPart]=(c[i.bodyPart]||0)+1;});var best="",n=0;for(var k in c)if(c[k]>n){n=c[k];best=k;}return best;}
 
+  // iOS식 왼쪽 스와이프로 삭제 버튼 노출 (라이브러리 없이 Pointer Events). 세로 스크롤과 공존.
+  function enableSwipeDelete(box){
+    $$(box,".swipe-wrap").forEach(function(w){
+      var row=w.querySelector(".exrow");if(!row)return;
+      var sx=0,base=0,cur=0,dragging=false,moved=false,horiz=false,sy=0;
+      function move(e){
+        if(!dragging)return;
+        var dx=e.clientX-sx, dy=e.clientY-sy;
+        if(!horiz){                              // 방향 확정 전: 세로가 크면 스와이프 취소(스크롤 양보)
+          if(Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>8){end(null);return;}
+          if(Math.abs(dx)>8)horiz=true;else return;
+        }
+        moved=true;
+        var x=base+dx;if(x>0)x=0;if(x<-92)x=-92;cur=x;
+        row.style.transform="translateX("+x+"px)";
+      }
+      function end(){
+        if(!dragging)return;dragging=false;
+        document.removeEventListener("pointermove",move);
+        document.removeEventListener("pointerup",end);
+        document.removeEventListener("pointercancel",end);
+        w.classList.remove("dragging");
+        w._open=cur<-42;cur=w._open?-84:0;
+        row.style.transform=w._open?"translateX(-84px)":"";
+        if(moved){row._suppressClick=true;setTimeout(function(){row._suppressClick=false;},60);}
+      }
+      row.addEventListener("pointerdown",function(e){
+        if(e.pointerType==="mouse"&&e.button!==0)return;
+        sx=e.clientX;sy=e.clientY;base=w._open?-84:0;cur=base;dragging=true;moved=false;horiz=false;
+        w.classList.add("dragging");
+        document.addEventListener("pointermove",move);
+        document.addEventListener("pointerup",end);
+        document.addEventListener("pointercancel",end);
+      });
+    });
+  }
   // 종목 선택 시트: 카테고리 탭 + 목록 탭 선택 + 검색/직접추가.  onPick(name,bodyPart) 콜백.
   var PICK_CATS=["전체","가슴","등","하체","어깨","팔","코어","유산소"];
   var pickerCat="전체";
@@ -1228,10 +1294,25 @@
       var html="";
       if(q&&names.indexOf(q)===-1){var nbp=(pickerCat!=="전체"?pickerCat:bodyPartFor(q));
         html+='<button class="exrow addnew" data-new="'+esc(q)+'" data-bp="'+esc(nbp)+'"><span class="exn">＋ "'+esc(q)+'" 직접 추가</span><span class="exbp">'+esc(nbp)+'</span></button>';}
-      html+=names.map(function(n){return '<button class="exrow" data-n="'+esc(n)+'" data-bp="'+esc(map[n])+'"><span class="exn">'+esc(n)+'</span><span class="exbp">'+esc(map[n])+'</span></button>';}).join("");
+      html+=names.map(function(n){
+        var row='<button class="exrow" data-n="'+esc(n)+'" data-bp="'+esc(map[n])+'"><span class="exn">'+esc(n)+'</span><span class="exbp">'+esc(map[n])+'</span></button>';
+        // 내가 직접 추가한 종목(기본 목록에 없는 것)만 왼쪽으로 밀어서 삭제 가능
+        if(!SEED_EX[n])return '<div class="swipe-wrap"><button class="swipe-del" data-del="'+esc(n)+'">삭제</button>'+row+'</div>';
+        return row;
+      }).join("");
       if(!html)html='<div class="faint" style="padding:18px;text-align:center;font-size:13px">종목이 없어요. 위 칸에 이름을 입력해 추가하세요.</div>';
       box.innerHTML=html;
-      $$(box,".exrow").forEach(function(b){b.onclick=function(){var nm=b.getAttribute("data-new")||b.getAttribute("data-n");var bp=b.getAttribute("data-bp")||bodyPartFor(nm);onPick(nm,bp);};});
+      $$(box,".exrow").forEach(function(b){b.onclick=function(){
+        if(b._suppressClick)return;                                  // 스와이프 직후 클릭 무시
+        var w=b.closest(".swipe-wrap");if(w&&w._open){w._open=false;b.style.transform="";return;}  // 열려있으면 닫기만
+        var nm=b.getAttribute("data-new")||b.getAttribute("data-n");var bp=b.getAttribute("data-bp")||bodyPartFor(nm);onPick(nm,bp);};});
+      $$(box,".swipe-del").forEach(function(d){d.onclick=function(){
+        var nm=d.getAttribute("data-del");
+        var hasHist=sessions.some(function(s){return s.entries.some(function(en){return en.exercise===nm;});});
+        if(hasHist&&!confirm("'"+nm+"'은 지난 기록이 있어요. 목록에서 지워도 기록은 남습니다. 삭제할까요?"))return;
+        exercises=exercises.filter(function(e){return e.name!==nm;});save(K.exercises,exercises);
+        paintList();toast("삭제됨");};});
+      enableSwipeDelete(box);
     }
     $("#pkSearch").addEventListener("input",paintList);
     paintCats();paintList();
@@ -1515,9 +1596,9 @@
       if(!r)return '<div class="recrow"><span class="recdot" style="background:'+MUSCLE_BASE+'"></span><span class="recname">'+g+'</span><span class="recpct faint">기록 없음</span><span class="recago"></span></div>';
       var col=recoveryColor(r.pct);
       var state=r.pct>=90?"회복 완료":r.pct>=70?"회복 중":"피로";
-      var loadLbl=r.load>=1.1?"볼륨 많음":r.load<=0.9?"볼륨 적음":"보통";  // load 1.1 ≈ 평소의 1.25배
+      var loadLbl=r.load>=1.1?" · 볼륨 많음":r.load<=0.9?" · 볼륨 적음":"";  // 평소보다 많/적을 때만 표시(보통은 생략)
       return '<div class="recrow"><span class="recdot" style="background:'+col+'"></span><span class="recname">'+g+
-        ' <span class="faint" style="font-weight:500;font-size:12px">'+state+' · '+fmt(fromKg(r.vol,settings.unit))+settings.unit+' ('+loadLbl+')</span></span>'+
+        ' <span class="faint" style="font-weight:500;font-size:12px">'+state+' · '+fmt(fromKg(r.vol,settings.unit))+settings.unit+loadLbl+'</span></span>'+
         '<span class="recpct" style="color:'+col+'">'+r.pct+'%</span><span class="recago faint">'+daysAgoLabel(r.date)+'</span></div>';
     }).join("");
     listCard.innerHTML='<div class="sectitle">부위별 회복</div>'+rows;
