@@ -174,7 +174,7 @@
   .exrow .exbp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);flex:none}
   .exrow.addnew .exn{color:var(--accent-ink)}
   .swipe-wrap{position:relative;overflow:hidden;border-bottom:1px solid var(--line-soft)}
-  .swipe-wrap .exrow{border-bottom:none;background:var(--card);transition:transform .18s ease;touch-action:pan-y}
+  .swipe-wrap .exrow{position:relative;z-index:1;border-bottom:none;background:var(--card);transition:transform .18s ease;touch-action:pan-y}
   .swipe-wrap.dragging .exrow{transition:none}
   .swipe-del{position:absolute;top:0;right:0;height:100%;width:84px;border:none;background:#EF5B5B;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
 
