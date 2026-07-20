@@ -52,6 +52,7 @@
   }
   header.top h1{margin:0;font-size:18px;font-weight:800;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
   header.top h1 .dot{width:9px;height:9px;border-radius:50%;background:var(--accent)}
+  header.top h1 .ver{font-size:11px;font-weight:700;font-family:var(--mono);color:var(--ink-faint);background:var(--line-soft);border:1px solid var(--line);border-radius:999px;padding:2px 7px;letter-spacing:0}
   .htools{display:flex;align-items:center;gap:8px}
   /* 종목별 단위 토글 (kg/lb) */
   .unit-mini{display:inline-flex;background:var(--line-soft);border:1px solid var(--line);border-radius:999px;padding:2px;font-family:var(--mono);font-size:11px;font-weight:700}
@@ -278,7 +279,7 @@
 <body>
 <div class="app">
   <header class="top">
-    <h1><span class="dot"></span> Training Log</h1>
+    <h1><span class="dot"></span> Training Log <span class="ver" id="appVer"></span></h1>
     <div class="htools">
       <button class="icon-btn" id="menuBtn" title="메뉴">⋯</button>
     </div>
@@ -311,6 +312,9 @@
 <script>
 (function(){
 "use strict";
+
+// 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
+var APP_VERSION="v1.0";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -434,6 +438,14 @@
   // 부위별 목표 반복 범위 (RP Strength 자료 기반): 대근육(가슴/등/하체/코어) 8~12, 소근육(어깨/팔) 10~15
   function repRangeFor(bodyPart){return (bodyPart==="어깨"||bodyPart==="팔")?{lo:10,hi:15}:{lo:8,hi:12};}
   function isSmallMuscle(bodyPart){return bodyPart==="어깨"||bodyPart==="팔";}
+  // 3대 운동만 1RM 갱신 도전 멘트를 유지 (파생운동 제외 — 정확히 이 세 이름만)
+  function isBig3(name){name=(name||"").trim();return name==="벤치프레스"||name==="스쿼트"||name==="데드리프트";}
+  // 가장 최근 완료 세션에서 해당 종목의 entry(세트 전체) 반환
+  function lastSessionEntry(name){
+    for(var i=sessions.length-1;i>=0;i--){var s=sessions[i];
+      for(var j=0;j<s.entries.length;j++)if(s.entries[j].exercise===name)return {en:s.entries[j],date:s.date};}
+    return null;
+  }
 
 /* ============================================================
    추천/1RM 계산
@@ -698,7 +710,7 @@
     return wrap;
   }
 
-  // 완료한 마지막 세트(+RPE)로 추정 1RM을 내고, 피로를 반영해 다음 세트의 중량×횟수를 예측
+  // 기준 세트(완료한 마지막 세트) + 내 최고 1RM 으로 다음 세트의 중량×횟수를 예측
   function recForEntry(en){
     // 기준 세트: 완료 체크한 마지막 세트. 없으면 값이 채워진 마지막 세트.
     var st=null,fb=null;
@@ -711,17 +723,26 @@
     if(!st)return null;
     var loadKg=setKg(en,st);
     if(loadKg<=0)return null;
-    var e1=estimate1RM(loadKg,+st.reps,st.rpe!=null?+st.rpe:null);   // RPE 있으면 차트, 없으면 Epley
+    var curE1=estimate1RM(loadKg,+st.reps,st.rpe!=null?+st.rpe:null);   // 이번 세트 기준 e1RM (RPE 있으면 차트)
     var inc=detectInc(en);  // 입력 데이터로 이 종목의 증량 단위를 추론
-    var exObj=findEx(en.exercise);var prev=exObj?exObj.best1RM:0;
+    var exObj=findEx(en.exercise);var best=exObj?exObj.best1RM:0;
     var rr=repRangeFor(en.bodyPart), bw=+settings.bodyweightKg||70;
-    // PR(1RM 갱신 도전)은 대근육만. 소근육(어깨/팔)은 고반복이 목표라 무거운 3회 도전이 부적합.
-    if(!isAssist(en) && !isSmallMuscle(en.bodyPart) && e1>prev*1.001 && prev>0 && +st.reps<=12){
-      var attempt=roundInc(fromKg(e1*pctFromRepsRPE(3,9),en.unit),inc);
-      return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(e1,en.unit))+en.unit+
-        ' (이전 '+fmt(fromKg(prev,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
+    // 최고 기록 갱신 시 도전 멘트: 3대운동은 1RM(×3회), 나머지는 목표횟수의 최고 무게
+    if(!isAssist(en) && best>0 && curE1>best*1.001 && +st.reps<=12){
+      if(isBig3(en.exercise)){
+        var attempt=roundInc(fromKg(curE1*pctFromRepsRPE(3,9),en.unit),inc);
+        return {pr:true,html:'<span class="em">🔥</span><div><b>1RM 갱신 가능!</b> 추정 1RM '+fmt(fromKg(curE1,en.unit))+en.unit+
+          ' (이전 '+fmt(fromKg(best,en.unit))+en.unit+'). 다음에 <b>'+fmt(attempt)+en.unit+' × 3회</b> 도전해보세요.</div>'};
+      }
+      var chW=Math.ceil(fromKg(curE1*pctFromRepsRPE(rr.lo,10),en.unit)/inc)*inc; // rr.lo회의 최고 무게(올림)
+      if(isAssist(en))chW=+st.weight;
+      return {pr:true,html:'<span class="em">🔥</span><div><b>최고 기록!</b> 추정 1RM '+fmt(fromKg(curE1,en.unit))+en.unit+
+        ' (이전 '+fmt(fromKg(best,en.unit))+en.unit+'). 다음에 <b>'+fmt(chW)+en.unit+' × '+rr.lo+'회</b> 도전해보세요.</div>'};
     }
-    var e1f=e1*FATIGUE_FACTOR;                       // 다음 세트의 (피로 반영) 능력치
+    // 다음 세트 추천: 웜업 첫 세트 보정 — 첫 세트가 내 최고보다 확연히 약하면 최고 1RM을 기준으로(웜업 이후 본세트 무게).
+    var refE1=curE1;
+    if(!isAssist(en) && en.sets.indexOf(st)===0 && best>curE1 && curE1<best*0.9)refE1=best;
+    var e1f=refE1*FATIGUE_FACTOR;                    // 다음 세트의 (피로 반영) 능력치
     function loadAt(w){return isAssist(en)?Math.max(0,bw-toKg(w,en.unit)):toKg(w,en.unit);} // 표시무게→유효부하
     function rdist(r){return r<rr.lo?rr.lo-r:(r>rr.hi?r-rr.hi:0);}   // 목표 범위와의 거리
     var dispW=+st.weight, pred=repsAtWeight(e1f,loadAt(dispW));
@@ -804,14 +825,20 @@
   function startSession(preItems){
     active={id:uid("s"),date:todayISO(),startTs:null,endTs:null,entries:[]};  // startTs는 첫 입력 때 설정
     if(preItems&&preItems.length){preItems.forEach(function(it){
+      var le=lastSessionEntry(it.exercise);          // 직전 세션 entry(세트 전체)
       var last=lastRecord(it.exercise);
-      var unit=last?last.unit:(settings.unit||"kg");
+      var unit=le?le.en.unit:(last?last.unit:(settings.unit||"kg"));
       var ex=ensureEx(it.exercise,it.bodyPart);
-      var mode=ex.mode||(last&&last.mode)||(assistDefault(it.exercise)?"assist":"weight");
+      var mode=ex.mode||(le&&le.en.mode)||(last&&last.mode)||(assistDefault(it.exercise)?"assist":"weight");
       ex.mode=mode;
-      var sets=[];var n=Math.max(1,it.targetSets||1);
-      for(var i=0;i<n;i++)sets.push({weight:last?last.set.weight:"",reps:last?last.set.reps:(it.targetReps||""),rpe:null});
-      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,mode:mode,memo:last?last.memo:"",sets:sets});
+      var sets;
+      if(le&&le.en.sets&&le.en.sets.length){         // 직전 기록의 세트를 그대로 프리필(세트별 무게·횟수 보존)
+        sets=le.en.sets.map(function(s){return {weight:s.weight,reps:s.reps,rpe:null};});
+      }else{
+        sets=[];var n=Math.max(1,it.targetSets||1);
+        for(var i=0;i<n;i++)sets.push({weight:"",reps:(it.targetReps||""),rpe:null});
+      }
+      active.entries.push({exercise:it.exercise,bodyPart:it.bodyPart||bodyPartFor(it.exercise),unit:unit,mode:mode,memo:(le?le.en.memo:(last?last.memo:""))||"",sets:sets});
     });save(K.exercises,exercises);}
     persistActive();renderToday();
   }
@@ -1110,7 +1137,7 @@
     if(!hist.length){openSheet(head+'<div class="empty muted" style="padding:20px">아직 기록이 없습니다</div><button class="btn primary block" id="hClose">닫기</button>');$("#hClose").onclick=closeSheet;return;}
 
     function recordsHTML(){
-      return '<div class="hlist">'+hist.map(function(h){
+      return '<div class="hlist">'+hist.slice(0,3).map(function(h){   // 최근 3개 세션까지
         var vol=volE(h.en),e1=e1e(h.en),inten=e1>0?Math.round(maxW(h.en)/e1*100):0;
         var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(i+1)+'</span>'+
           '<span class="hcell"><b class="hn">'+fmt(st.weight)+'</b><span class="u">'+esc(h.en.unit)+'</span></span>'+
@@ -1699,6 +1726,7 @@
 /* ============================================================
    부팅
    ============================================================ */
+  var verEl=$("#appVer");if(verEl)verEl.textContent=APP_VERSION;
   updateExDatalist();renderToday();
   if(active)tickTimer();
 })();
