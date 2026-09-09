@@ -314,7 +314,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.1";
+var APP_VERSION="v1.2";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -1228,14 +1228,20 @@ var APP_VERSION="v1.1";
     if(active){active.routineId=r.id;active.routineName=r.name;persistActive();}  // 종료 시 루틴 업데이트 제안용
     switchTab("today");toast(r.name+" 시작");
   }
-  // 루틴 items 에 이번 세션 구성을 병합 (추가·세트수 갱신만; 오늘 안 한 종목은 유지, 삭제 안 함)
+  // 루틴 items 에 이번 세션 구성을 병합.
+  // 이번 운동의 순서는 반영하고, 오늘 하지 않은 기존 종목만 뒤에 유지한다(삭제하지 않음).
   function mergeRoutineItems(routineItems,sessionItems){
-    var out=routineItems.map(function(it){return {exercise:it.exercise,bodyPart:it.bodyPart,targetSets:it.targetSets,targetReps:it.targetReps};});
+    var old={};routineItems.forEach(function(it){old[it.exercise]=it;});
+    var seen={},out=[];
     sessionItems.forEach(function(si){
-      var found=null;for(var i=0;i<out.length;i++)if(out[i].exercise===si.exercise){found=out[i];break;}
-      if(found){found.targetSets=si.targetSets;}   // 기존 종목은 세트 수만 갱신(불필요한 변경 방지)
-      else out.push({exercise:si.exercise,bodyPart:si.bodyPart,targetSets:si.targetSets,targetReps:si.targetReps});
+      if(seen[si.exercise])return;seen[si.exercise]=true;
+      var before=old[si.exercise];
+      // 오늘 수행한 종목은 현재 순서와 세트 수를 반영한다.
+      out.push({exercise:si.exercise,bodyPart:si.bodyPart,targetSets:si.targetSets,
+        targetReps:before?before.targetReps:si.targetReps});
     });
+    // 오늘 건너뛴 기존 종목은 삭제하지 않고, 기존 상대 순서를 유지해 뒤에 남긴다.
+    routineItems.forEach(function(it){if(!seen[it.exercise])out.push({exercise:it.exercise,bodyPart:it.bodyPart,targetSets:it.targetSets,targetReps:it.targetReps});});
     return out;
   }
   function openRoutinePicker(){
