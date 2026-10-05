@@ -314,7 +314,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.2";
+var APP_VERSION="v1.3";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -511,6 +511,8 @@ var APP_VERSION="v1.2";
   }
   function addEntry(name,bodyPart){
     name=(name||"").trim();if(!name||!active)return;
+    // 루틴 종목을 삭제했다가 같은 운동을 다시 추가한 경우, 루틴 삭제 의도를 취소한다.
+    if(active.routineRemoved){active.routineRemoved=active.routineRemoved.filter(function(n){return n!==name;});}
     var e=ensureEx(name,bodyPart);
     var last=lastRecord(name);
     // 종목은 마지막에 쓰던 단위를 기억 (A머신 kg / B머신 lb) → 없으면 kg 기본
@@ -778,7 +780,15 @@ var APP_VERSION="v1.2";
       active.entries[ei].sets.push({weight:last.weight,reps:last.reps,rpe:null});persistActive();renderToday();}
     else if(act==="rmSet"){var si=+t.getAttribute("data-si");active.entries[ei].sets.splice(si,1);
       if(active.entries[ei].sets.length===0)active.entries[ei].sets.push({weight:"",reps:"",rpe:null});persistActive();renderToday();}
-    else if(act==="rmEntry"){if(confirm("이 종목을 삭제할까요?")){active.entries.splice(ei,1);persistActive();renderToday();}}
+    else if(act==="rmEntry"){if(confirm("이 종목을 삭제할까요?")){
+      var removed=active.entries[ei];
+      // 루틴에서 불러온 종목을 직접 삭제한 것은 '오늘 건너뜀'이 아니라 루틴에서도 제거하려는 의도다.
+      if(active.routineId&&removed){
+        active.routineRemoved=active.routineRemoved||[];
+        if(active.routineRemoved.indexOf(removed.exercise)<0)active.routineRemoved.push(removed.exercise);
+      }
+      active.entries.splice(ei,1);persistActive();renderToday();
+    }}
     else if(act==="history"){openExerciseHistory(t.getAttribute("data-ex"));}
   });
   $("#view-today").addEventListener("input",function(e){
@@ -864,7 +874,7 @@ var APP_VERSION="v1.2";
       if(bestE1>exo.best1RM*1.001){if(exo.best1RM>0)prs.push({name:en.exercise,e1:bestE1,prev:exo.best1RM,unit:en.unit});exo.best1RM=bestE1;}
     });
     var sess={id:active.id,date:active.date,startTs:active.startTs,endTs:Date.now(),durationSec:durationSec,entries:kept,totalVolume:volKg};
-    var rid=active.routineId;
+    var rid=active.routineId,removedFromRoutine=(active.routineRemoved||[]).slice();
     sessions.push(sess);save(K.sessions,sessions);save(K.exercises,exercises);
     active=null;save(K.active,null);
     if(timerInt){clearInterval(timerInt);timerInt=null;}
@@ -874,8 +884,10 @@ var APP_VERSION="v1.2";
       var rt=null;for(var ri=0;ri<routines.length;ri++)if(routines[ri].id===rid){rt=routines[ri];break;}
       if(rt){
         var cur=kept.map(function(en){return {exercise:en.exercise,bodyPart:en.bodyPart,targetSets:en.sets.length,targetReps:(en.sets[0]&&en.sets[0].reps)||""};});
-        var merged=mergeRoutineItems(rt.items,cur);   // 추가·세트 갱신만, 오늘 안 한 종목은 유지
-        if(JSON.stringify(merged)!==JSON.stringify(rt.items)&&confirm("'"+rt.name+"' 루틴에 추가·변경된 종목이 있어요. 루틴에 반영할까요? (오늘 안 한 종목은 그대로 유지돼요)")){
+        // 운동 중 '삭제'한 종목만 루틴에서도 제거한다. 단순 미수행 종목은 유지한다.
+        var base=rt.items.filter(function(it){return removedFromRoutine.indexOf(it.exercise)<0;});
+        var merged=mergeRoutineItems(base,cur);
+        if(JSON.stringify(merged)!==JSON.stringify(rt.items)&&confirm("'"+rt.name+"' 루틴에 추가·변경·삭제된 종목이 있어요. 루틴에 반영할까요? (오늘 하지 않은 종목은 그대로 유지돼요)")){
           rt.items=merged;rt.bodyPart=commonBodyPart(merged);save(K.routines,routines);toast("루틴 업데이트됨");
         }
       }
