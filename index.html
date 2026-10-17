@@ -314,7 +314,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.3";
+var APP_VERSION="v1.4";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -653,7 +653,7 @@ var APP_VERSION="v1.3";
     var entryList=el("div",{id:"entryList"});
     active.entries.forEach(function(en,ei){entryList.appendChild(renderEntry(en,ei));});
     v.appendChild(entryList);
-    enableDragSort(entryList,function(){return active.entries;},function(a){active.entries=a;persistActive();renderToday();});
+    enableDragSort(entryList,function(){return active.entries;},function(a){active.entries=a;if(active.routineId)active.routineOrderChanged=true;persistActive();renderToday();});
 
     var add=el("div",{class:"card"},
       '<div class="sectitle">종목 추가</div>'+
@@ -875,6 +875,8 @@ var APP_VERSION="v1.3";
     });
     var sess={id:active.id,date:active.date,startTs:active.startTs,endTs:Date.now(),durationSec:durationSec,entries:kept,totalVolume:volKg};
     var rid=active.routineId,removedFromRoutine=(active.routineRemoved||[]).slice();
+    // 미수행 종목도 순서 변경 대상이므로 완료 세트가 없는 종목을 포함한 전체 순서를 기억한다.
+    var routineOrder=active.routineOrderChanged?active.entries.map(function(en){return en.exercise;}):null;
     sessions.push(sess);save(K.sessions,sessions);save(K.exercises,exercises);
     active=null;save(K.active,null);
     if(timerInt){clearInterval(timerInt);timerInt=null;}
@@ -886,7 +888,7 @@ var APP_VERSION="v1.3";
         var cur=kept.map(function(en){return {exercise:en.exercise,bodyPart:en.bodyPart,targetSets:en.sets.length,targetReps:(en.sets[0]&&en.sets[0].reps)||""};});
         // 운동 중 '삭제'한 종목만 루틴에서도 제거한다. 단순 미수행 종목은 유지한다.
         var base=rt.items.filter(function(it){return removedFromRoutine.indexOf(it.exercise)<0;});
-        var merged=mergeRoutineItems(base,cur);
+        var merged=mergeRoutineItems(base,cur,routineOrder);
         if(JSON.stringify(merged)!==JSON.stringify(rt.items)&&confirm("'"+rt.name+"' 루틴에 추가·변경·삭제된 종목이 있어요. 루틴에 반영할까요? (오늘 하지 않은 종목은 그대로 유지돼요)")){
           rt.items=merged;rt.bodyPart=commonBodyPart(merged);save(K.routines,routines);toast("루틴 업데이트됨");
         }
@@ -1201,7 +1203,7 @@ var APP_VERSION="v1.3";
       active.entries.forEach(function(en,i){box.appendChild(el("div",{class:"reitem","data-row":"1","data-idx":String(i)},
         '<span class="drag-handle" data-drag-handle title="드래그로 순서 변경">⠿</span>'+
         '<span class="reitem-name"><b>'+esc(en.exercise)+'</b> <span class="faint" style="font-size:12px">'+esc(en.bodyPart)+'</span></span>'));});
-      enableDragSort(box,function(){return active.entries;},function(a){active.entries=a;persistActive();paint();});}
+      enableDragSort(box,function(){return active.entries;},function(a){active.entries=a;if(active.routineId)active.routineOrderChanged=true;persistActive();paint();});}
     paint();
     $("#reorderDone").onclick=function(){closeSheet();renderToday();};
   }
@@ -1240,20 +1242,25 @@ var APP_VERSION="v1.3";
     if(active){active.routineId=r.id;active.routineName=r.name;persistActive();}  // 종료 시 루틴 업데이트 제안용
     switchTab("today");toast(r.name+" 시작");
   }
-  // 루틴 items 에 이번 세션 구성을 병합.
-  // 이번 운동의 순서는 반영하고, 오늘 하지 않은 기존 종목만 뒤에 유지한다(삭제하지 않음).
-  function mergeRoutineItems(routineItems,sessionItems){
-    var old={};routineItems.forEach(function(it){old[it.exercise]=it;});
-    var seen={},out=[];
-    sessionItems.forEach(function(si){
-      if(seen[si.exercise])return;seen[si.exercise]=true;
-      var before=old[si.exercise];
-      // 오늘 수행한 종목은 현재 순서와 세트 수를 반영한다.
-      out.push({exercise:si.exercise,bodyPart:si.bodyPart,targetSets:si.targetSets,
-        targetReps:before?before.targetReps:si.targetReps});
+  // 명시적 순서 변경이 없으면 기존 순서를 그대로 유지한다. 미수행 종목도 제자리다.
+  function mergeRoutineItems(routineItems,sessionItems,routineOrder){
+    var updates=Object.create(null),seen=Object.create(null);
+    sessionItems.forEach(function(si){if(!updates[si.exercise])updates[si.exercise]=si;});
+    var out=routineItems.map(function(it){
+      var si=updates[it.exercise];seen[it.exercise]=true;
+      return si?Object.assign({},it,{bodyPart:si.bodyPart,targetSets:si.targetSets}):Object.assign({},it);
     });
-    // 오늘 건너뛴 기존 종목은 삭제하지 않고, 기존 상대 순서를 유지해 뒤에 남긴다.
-    routineItems.forEach(function(it){if(!seen[it.exercise])out.push({exercise:it.exercise,bodyPart:it.bodyPart,targetSets:it.targetSets,targetReps:it.targetReps});});
+    // 새로 수행한 종목은 기존 루틴 뒤에 추가한다.
+    sessionItems.forEach(function(si){if(!seen[si.exercise]){seen[si.exercise]=true;out.push({exercise:si.exercise,bodyPart:si.bodyPart,targetSets:si.targetSets,targetReps:si.targetReps});}});
+    if(routineOrder){
+      var rank=Object.create(null);
+      routineOrder.forEach(function(name,i){if(rank[name]===undefined)rank[name]=i;});
+      // 사용자가 직접 정렬한 순서에는 완료하지 않은 기존 종목도 포함된다.
+      out=out.map(function(it,i){return {item:it,index:i};}).sort(function(a,b){
+        var ra=rank[a.item.exercise],rb=rank[b.item.exercise];
+        return (ra===undefined?routineOrder.length+a.index:ra)-(rb===undefined?routineOrder.length+b.index:rb);
+      }).map(function(row){return row.item;});
+    }
     return out;
   }
   function openRoutinePicker(){
