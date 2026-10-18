@@ -314,7 +314,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.4";
+var APP_VERSION="v1.5";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -359,8 +359,8 @@ var APP_VERSION="v1.4";
   var MUSCLE_BASE="#D9DEE6";   // 운동 안 한 근육(회색, 실루엣보다 약간 진하게)
   var MUSCLE_HI="#E0662A";     // 운동한 근육(러스트)
   // 부위별 완전 회복까지 기준 시간(h) — 큰 근육일수록 오래. 볼륨으로 ±20% 보정.
-  var RECOVERY_HOURS={"가슴":60,"등":72,"어깨":48,"하체":72,"이두":48,"삼두":48,"코어":36};
-  var RECOVERY_GROUPS=["가슴","등","어깨","하체","이두","삼두","코어"];
+  var RECOVERY_HOURS={"가슴":60,"등":72,"전면어깨":48,"측면어깨":48,"후면어깨":48,"하체":72,"이두":48,"삼두":48};
+  var RECOVERY_GROUPS=["가슴","등","전면어깨","측면어깨","후면어깨","하체","이두","삼두"];
   // 회복도는 팔을 이두/삼두로 나눠 본다 (종목 이름으로 판별, 구분 불가하면 둘 다).
   var ARM_BI=/컬|바이셉스|biceps|curl/i;
   var ARM_TRI=/익스텐션|푸시다운|푸쉬다운|트라이셉스|triceps|킥백|스컬|딥스|클로즈\s*그립|extension|pushdown|dip/i;
@@ -911,7 +911,7 @@ var APP_VERSION="v1.4";
   //   실루엣(테이퍼형) 위에 근육을 얹고, 얇은 결 라인으로 정의를 살림.
   function muscleFigureSVG(ox,kind,cf){
     var SIL="#EAEDF2",SILS="#CFD5DE",LN="rgba(90,100,112,.24)";
-    function c(g){return cf(g);}
+    function c(g){return cf(g,kind);}
     var p='<g transform="translate('+ox+',0)" stroke-linejoin="round" stroke-linecap="round">';
     // ── 실루엣(몸) ──
     p+='<g fill="'+SIL+'" stroke="'+SILS+'" stroke-width="1.5">';
@@ -1580,20 +1580,40 @@ var APP_VERSION="v1.4";
 /* ============================================================
    렌더: 회복도 (Recovery)
    ------------------------------------------------------------
-   회복률(%) = 마지막 운동 이후 경과 시간 / 부위별 회복 필요 시간.
-   회복 필요 시간 = 기준시간(부위 크기) × (0.8~1.2, 마지막 세션 볼륨 보정).
-   근거: 저항운동 후 회복은 보통 24~72h, 큰 근육·고볼륨일수록 오래.
-         (개인차·수면·영양 영향 큼 → '추정'으로 표기)
+   볼륨과 경과시간을 사용하는 경험적 추정 모델. 협응근 가중치는 측정값이
+   아니며 종목 이름으로 보수적으로 추정한다. 여러 세션의 피로도 함께 반영.
    ============================================================ */
-  // 세션 하나를 부위별 {vol(kg), sets} 로 집계
+  function recoveryMusclesFor(en){
+    var n=en.exercise||"",p=en.bodyPart,weights={};
+    function add(g,w){weights[g]=Math.max(weights[g]||0,w);}
+    if(p==="어깨"){
+      if(/후면|리어|rear|reverse|리버스|페이스\s*풀|face\s*pull/i.test(n))add("후면어깨",1);
+      else if(/측면|사이드|레터럴|lateral/i.test(n))add("측면어깨",1);
+      else if(/전면|프론트|front/i.test(n))add("전면어깨",1);
+      else if(/프레스|press/i.test(n)){add("전면어깨",1);add("측면어깨",0.5);add("삼두",0.35);}
+      else {add("전면어깨",1);add("측면어깨",1);add("후면어깨",1);}
+    }else{
+      recGroupsFor(en).forEach(function(g){if(RECOVERY_HOURS[g])add(g,1);});
+      if(p==="가슴"&&/프레스|press|벤치|bench|푸시\s*업|푸쉬\s*업|push\s*up|딥스|dip/i.test(n)){
+        add("삼두",0.35);add("전면어깨",0.25);
+      }
+      if(p==="등"&&!/스트레이트\s*암|straight\s*arm|풀오버|pullover/i.test(n)&&/로우|row|풀다운|pull\s*down|풀업|pull\s*up|친업|chin\s*up/i.test(n)){
+        add("이두",0.35);add("후면어깨",0.25);
+      }
+    }
+    return weights;
+  }
+  // 볼륨은 유효 중량에 부위별 가중치를 곱한 추정 자극량이다.
   function sessionLoadByGroup(s){
     var by={};
-    s.entries.forEach(function(en){
-      var v=0;en.sets.forEach(function(st){v+=setKg(en,st)*(+st.reps);});
-      recGroupsFor(en).forEach(function(g){
-        if(!RECOVERY_HOURS[g])return;
-        if(!by[g])by[g]={vol:0,sets:0};
-        by[g].vol+=v;by[g].sets+=en.sets.length;
+    (s.entries||[]).forEach(function(en){
+      var v=0,count=0;(en.sets||[]).forEach(function(st){var reps=+st.reps;if(reps>0){v+=setKg(en,st)*reps;count++;}});
+      if(!count)return;
+      var muscles=recoveryMusclesFor(en);
+      Object.keys(muscles).forEach(function(g){var w=muscles[g];
+        if(!by[g])by[g]={vol:0,sets:0,directSets:0,indirectSets:0};
+        by[g].vol+=v*w;by[g].sets+=count*w;
+        if(w===1)by[g].directSets+=count;else by[g].indirectSets+=count*w;
       });
     });
     return by;
@@ -1608,16 +1628,20 @@ var APP_VERSION="v1.4";
     for(var i=sessions.length-1;i>=0;i--){
       var s=sessions[i],by=sessionLoadByGroup(s);
       for(var g in by){
-        if(res[g]!==null)continue;   // 이미 더 최근 세션에서 처리됨
         var endTs=s.endTs||new Date(s.date+"T18:00:00").getTime();
         var hoursAgo=Math.max(0,(Date.now()-endTs)/3600000);
         // 볼륨 강도 반영: 평소 대비 볼륨이 많을수록 회복에 더 오래 걸림 (0.6~1.6배)
         var ratio=avg[g]>0?by[g].vol/avg[g]:1;
         var load=Math.max(0.6,Math.min(1.6,0.6+0.4*ratio));
         var req=RECOVERY_HOURS[g]*load;
-        res[g]={pct:Math.max(0,Math.min(100,Math.round(hoursAgo/req*100))),date:s.date,sets:by[g].sets,vol:by[g].vol,load:load};
+        // 간접 자극만 있는 경우 세트 수와 가중치에 따라 일부 피로를 반영한다.
+        var impact=by[g].directSets>0?1:Math.min(0.8,by[g].indirectSets/3);
+        var fatigue=impact*Math.max(0,1-hoursAgo/req);
+        if(!res[g])res[g]={fatigue:0,date:s.date,sets:by[g].sets,vol:by[g].vol,load:load,indirect:by[g].indirectSets>0};
+        res[g].fatigue=1-(1-res[g].fatigue)*(1-fatigue);
       }
     }
+    RECOVERY_GROUPS.forEach(function(g){if(res[g])res[g].pct=Math.max(0,Math.min(100,Math.round((1-res[g].fatigue)*100)));});
     return res;
   }
   // 회복률 색상: 90%↑ 초록 / 70%↑ 노랑 / 그 미만 빨강
@@ -1629,7 +1653,8 @@ var APP_VERSION="v1.4";
   function renderRecovery(){
     var v=$("#view-recovery");v.innerHTML="";
     var rec=recoveryData();
-    var cf=function(g){
+    var cf=function(g,kind){
+      if(g==="어깨")g=kind==="front"?"전면어깨":"후면어깨";
       if(g==="팔"){  // 전완: 이두/삼두 중 덜 회복된 쪽을 따라감
         var arr=[rec["이두"],rec["삼두"]].filter(Boolean);
         return arr.length?recoveryColor(Math.min.apply(null,arr.map(function(x){return x.pct;}))):MUSCLE_BASE;
@@ -1638,7 +1663,7 @@ var APP_VERSION="v1.4";
     var card=el("div",{class:"card"});
     card.innerHTML=
       '<h2 style="margin-bottom:4px">근육 회복도 <span class="badge">추정</span></h2>'+
-      '<div class="muted" style="font-size:13px;margin-bottom:12px">마지막 운동 이후 경과 시간 · 부위 크기 · <b>그날 볼륨</b>으로 추정해요. <b style="color:#37B24D">초록=회복</b> · <b style="color:#EF5B5B">빨강=피로</b></div>'+
+      '<div class="muted" style="font-size:13px;margin-bottom:12px">운동 볼륨과 경과 시간에 협응근의 간접 자극을 더한 추정치예요. 실제 회복 상태와 다를 수 있어요. <b style="color:#37B24D">초록=회복</b> · <b style="color:#EF5B5B">빨강=피로</b></div>'+
       '<div class="subtabs" id="recTabs"><button data-s="front" class="'+(recSide==="front"?"on":"")+'">정면</button><button data-s="back" class="'+(recSide==="back"?"on":"")+'">후면</button></div>'+
       '<svg viewBox="0 0 200 466" style="width:100%;max-width:260px;display:block;margin:2px auto 0">'+muscleFigureSVG(0,recSide,cf)+'</svg>';
     v.appendChild(card);
@@ -1652,7 +1677,7 @@ var APP_VERSION="v1.4";
       var state=r.pct>=90?"회복 완료":r.pct>=70?"회복 중":"피로";
       var loadLbl=r.load>=1.1?" · 볼륨 많음":r.load<=0.9?" · 볼륨 적음":"";  // 평소보다 많/적을 때만 표시(보통은 생략)
       return '<div class="recrow"><span class="recdot" style="background:'+col+'"></span><span class="recname">'+g+
-        ' <span class="faint" style="font-weight:500;font-size:12px">'+state+' · '+fmt(fromKg(r.vol,settings.unit))+settings.unit+loadLbl+'</span></span>'+
+        ' <span class="faint" style="font-weight:500;font-size:12px">'+state+' · 자극 추정 '+fmt(fromKg(r.vol,settings.unit))+settings.unit+(r.indirect?' · 간접 포함':'')+loadLbl+'</span></span>'+
         '<span class="recpct" style="color:'+col+'">'+r.pct+'%</span><span class="recago faint">'+daysAgoLabel(r.date)+'</span></div>';
     }).join("");
     listCard.innerHTML='<div class="sectitle">부위별 회복</div>'+rows;
