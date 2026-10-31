@@ -20,7 +20,7 @@
 ### 로컬에서 열기/미리보기
 정적 서버로 서빙하면 된다(파일 직접 열기 `file://`도 대체로 되지만 서버 권장):
 ```bash
-cd ~/Applications && python3 -m http.server 8091
+cd ~/Applications/'workout log' && python3 -m http.server 8091
 # 브라우저에서 http://localhost:8091/index.html
 ```
 
@@ -31,7 +31,7 @@ cd ~/Applications && python3 -m http.server 8091
 - iOS는 로컬 `file://` 앱에 영구 저장을 못 하므로 호스팅이 필요.
 
 ### 버전 확인 (업데이트 반영 체크)
-- `<script>` 최상단의 `var APP_VERSION="v1.5";` 상수. 헤더 "Training Log" 옆 배지로 표시된다.
+- `<script>` 최상단의 `var APP_VERSION="v1.6";` 상수. 헤더 "Training Log" 옆 배지로 표시된다.
 - **배포할 때마다 이 값을 올릴 것**(v1.1 → v1.2 …). 아이폰에서 배지 번호가 바뀌면 업데이트가 반영된 것.
 
 ---
@@ -70,7 +70,7 @@ tl.active    → 진행 중 세션 1개(없으면 null). 새로고침 복구용.
 
 1. **운동(today)** — 세션 없으면 시작 화면(운동 시작 / 루틴에서 시작 + 이번 주 주간 스트립 + 그날 기록 인라인 + 달력). 세션 중이면 경과타이머 + 종목 카드들 + 종목추가 + 운동종료. `renderToday()`.
 2. **회복(recovery)** — 부위별 회복도(근육 도식 + 목록). `renderRecovery()`.
-3. **기록(history)** — 날짜별 세션 카드. `renderHistory()`.
+3. **기록(history)** — 날짜별은 월~일 주간 목록(이전/다음/이번 주), 달력 날짜 선택 및 주 전체 보기. 종목별은 부위 필터와 상세 기록 팝업. `renderHistory()`.
 4. **루틴(routines)** — 루틴 목록/생성/편집. `renderRoutines()`, `openRoutineEditor()`.
 5. **리포트(report)** — 주간 부위별 볼륨/요일 차트/주간 평균. `renderReport()`.
 
@@ -87,6 +87,7 @@ tl.active    → 진행 중 세션 1개(없으면 null). 새로고침 복구용.
 ### 5-2. 추정 1RM & 추천 (`recForEntry`, index.html 근처 700~)
 - **e1RM**: RPE 있으면 RIR 기반 %1RM 차트(`RPE_CHART`, Zourdos/Helms), 없으면 Epley `w*(1+reps/30)`. `estimate1RM()`.
 - **RPE = 10 − 더 할 수 있는 횟수**. 입력 가능 범위 6~10(차트 범위). 비워도 됨.
+- v1.6: 상단 ⋯ 메뉴의 **RPE 사용** 체크박스로 켜기/끄기. `settings.rpeEnabled`에 저장하며 기존 사용자 기본값은 켜짐. 끄면 운동·오늘 기록 편집의 입력칸과 기록의 RPE 표시를 숨기고 `estimate1RM`에서 RPE를 무시한다. 설정 변경 시 최고 e1RM을 다시 계산해 추천 기준도 일치시킨다. 기존 RPE 값은 삭제하지 않으며 다시 켜면 복원된다.
 - **부위별 목표 반복수** `repRangeFor(bodyPart)`: 대근육(가슴/등/하체/코어) **8~12**, 소근육(어깨/팔) **10~15**. `isSmallMuscle()`.
 - **증량 단위 자동 추론** `detectInc(en)`: 그 종목에 실제로 입력한 무게들의 GCD로 판단(5kg 스텝→5, 덤벨 2kg→2, lb 머신→5/10). 추천 무게는 이 단위로 반올림.
 - **수행 가능 횟수 역산** `repsAtWeight(e1,w)`: 무게로 몇 회까지 가능한지(실패 지점) 계산(RPE10 열 보간 + 고반복은 Epley 역산).
@@ -121,6 +122,14 @@ tl.active    → 진행 중 세션 1개(없으면 null). 새로고침 복구용.
 ### 5-7. 종목 선택 picker (`openExercisePicker`)
 - 카테고리 칩 + 검색 + "직접 추가". 타이핑 datalist 아님(모바일 부적합).
 - **내가 추가한 종목**(`SEED_EX`에 없는 것)은 **왼쪽 스와이프로 삭제**(iOS식, `enableSwipeDelete`). 기록 있으면 확인 후 삭제(기록 자체는 보존).
+
+### 5-8. 오늘 완료한 기록 수정 (v1.6)
+- 홈 상단의 '오늘 완료한 운동'에서 회차별 수정. 진행 중인 운동이 있어도 완료 기록 편집 가능.
+- `openSessionEditor(id)`는 원본을 복사한 사본에서 중량/횟수/RPE/단위/일반·어시스트/메모 및 세트 추가·삭제를 편집한다. 종목당 최소 한 세트 유지. 단위 수정은 입력 숫자를 변환하지 않는다.
+- 저장 시 유효성 확인 → 해당 세션만 교체 → 총볼륨과 최고 e1RM 재계산. 날짜/운동시간/다른 회차/진행 중 운동/루틴은 보존한다. 저장 공간 오류 시 편집창 유지.
+- 취소 및 바깥 터치는 변경이 있을 때만 확인. 오늘 기록만 수정 가능하며 저장할 때도 날짜를 재확인한다.
+- 날짜별 기록 상태는 `histWeekOffset`, `histSelectedDate`; 부위 필터는 `histBodyPart`. `openCalendarSheet(onSelect,initialIso)`는 콜백이 있으면 날짜 선택기로, 없으면 기존 홈 달력으로 작동한다.
+- 검증: 로컬 브라우저에서 40kg×10 → 35kg×12 수정 후 420kg 집계, 새로고침 후 메모·세트 유지, 세트 추가/삭제와 변경 없는 취소, 주간 이동·달력 날짜 선택·부위 필터를 확인. 콘솔 오류 없음. iPhone 실기기 검증은 별도 필요.
 
 ---
 

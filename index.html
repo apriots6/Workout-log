@@ -130,6 +130,10 @@
   .hcell .u{font-size:12px;color:var(--ink-faint);font-weight:400}
   .hset-rpe{text-align:right;font-size:11px;color:var(--ink-faint);white-space:nowrap}
   .setgrid{display:grid;grid-template-columns:44px 1fr 12px 1fr 1fr 26px;gap:6px;align-items:center;margin-bottom:6px;border-radius:8px}
+  .setgrid.no-rpe{grid-template-columns:44px 1fr 12px 1fr 26px}
+  .record-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .record-edit-grid.no-rpe{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .record-edit-grid.no-rpe label:last-child{display:none}
   .setgrid.done{background:var(--good-soft)}
   .setgrid .idx{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
   .setgrid .idx .setchk{width:20px;height:20px;margin:0;accent-color:var(--good);flex:none}
@@ -314,7 +318,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.5";
+var APP_VERSION="v1.6";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -384,6 +388,7 @@ var APP_VERSION="v1.5";
   if(settings.incrementKg==null)settings.incrementKg=2.5;
   if(settings.incrementLb==null)settings.incrementLb=5;
   if(settings.bodyweightKg==null)settings.bodyweightKg=70;  // 칼로리 추정용 체중(kg)
+  if(settings.rpeEnabled==null)settings.rpeEnabled=true;
   save(K.settings,settings);
   var exercises=load(K.exercises,[]);     // [{name,bodyPart,best1RM}]  best1RM: 최고 추정1RM(kg 기준)
   var sessions=load(K.sessions,[]);       // 완료 세션 목록
@@ -457,6 +462,7 @@ var APP_VERSION="v1.5";
   }
   // 추정 1RM(kg). weightKg = kg로 정규화된 무게
   function estimate1RM(weightKg,reps,rpe){
+    if(settings.rpeEnabled===false)rpe=null;
     if(rpe!=null && reps<=12 && reps>=1){return weightKg/pctFromRepsRPE(reps,rpe);}
     return weightKg*(1+reps/30); // Epley 폴백
   }
@@ -603,6 +609,14 @@ var APP_VERSION="v1.5";
   var homeSelIso=null;  // 홈 스트립에서 선택한 날짜(그날 기록 인라인 표시)
   function renderToday(){
     var v=$("#view-today");v.innerHTML="";
+    var completedToday=sessions.filter(function(s){return s.date===todayISO();});
+    if(completedToday.length){
+      var editCard=el("div",{class:"card"},'<div class="sectitle">오늘 완료한 운동</div>');
+      completedToday.forEach(function(s,i){
+        var btn=el("button",{class:"btn ghost block",style:"margin-top:8px"},(i+1)+'번째 운동 · '+s.entries.length+'종목 · 기록 수정');
+        btn.onclick=function(){openSessionEditor(s.id);};editCard.appendChild(btn);
+      });v.appendChild(editCard);
+    }
     if(!active){
       v.appendChild(el("div",{class:"card empty"},
         '<div class="big">🏋️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">오늘의 운동을 시작하세요</div>'+
@@ -693,19 +707,19 @@ var APP_VERSION="v1.5";
         '<button data-act="setMode" data-ei="'+ei+'" data-m="weight" class="'+(!isAssist(en)?"on":"")+'">일반</button>'+
         '<button data-act="setMode" data-ei="'+ei+'" data-m="assist" class="'+(isAssist(en)?"on":"")+'">어시스트</button>'+
       '</span>'+(isAssist(en)?'<span class="inc-lbl">체중 '+fmt(fromKg(+settings.bodyweightKg||70,en.unit))+en.unit+' − 입력</span>':'')+'</div>'+
-      '<div class="setgrid set-head"><div></div><div>'+(isAssist(en)?'어시스트':'무게')+'('+esc(en.unit)+')</div><div></div><div>횟수</div><div>RPE</div><div></div></div>';
+      '<div class="setgrid set-head'+(settings.rpeEnabled===false?' no-rpe':'')+'"><div></div><div>'+(isAssist(en)?'어시스트':'무게')+'('+esc(en.unit)+')</div><div></div><div>횟수</div>'+(settings.rpeEnabled===false?'':'<div>RPE</div>')+'<div></div></div>';
     en.sets.forEach(function(st,si){
-      var g=el("div",{class:"setgrid"+(st.done?" done":"")});
+      var g=el("div",{class:"setgrid"+(st.done?" done":"")+(settings.rpeEnabled===false?' no-rpe':'')});
       g.innerHTML=
         '<div class="idx"><span>'+(si+1)+'</span><input type="checkbox" class="setchk" data-chk="1" data-ei="'+ei+'" data-si="'+si+'"'+(st.done?" checked":"")+' title="세트 완료"></div>'+
         '<input class="num" inputmode="decimal" data-f="weight" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.weight===""||st.weight==null?"":st.weight)+'" placeholder="0">'+
         '<div class="x">×</div>'+
         '<input class="num" inputmode="numeric" data-f="reps" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.reps===""||st.reps==null?"":st.reps)+'" placeholder="0">'+
-        '<input class="num" inputmode="decimal" data-f="rpe" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.rpe==null?"":st.rpe)+'" placeholder="-">'+
+        (settings.rpeEnabled===false?'':'<input class="num" inputmode="decimal" data-f="rpe" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.rpe==null?"":st.rpe)+'" placeholder="-">')+
         '<button class="rmset" data-act="rmSet" data-ei="'+ei+'" data-si="'+si+'" title="세트 삭제">✕</button>';
       wrap.appendChild(g);
     });
-    wrap.appendChild(el("div",{class:"rpe-note"},"RPE = 10 − 더 할 수 있는 횟수 · 비워도 됨"));
+    if(settings.rpeEnabled!==false)wrap.appendChild(el("div",{class:"rpe-note"},"RPE = 10 − 더 할 수 있는 횟수 · 비워도 됨"));
     var rec=recForEntry(en);
     if(rec)wrap.appendChild(el("div",{class:"rec"+(rec.pr?" pr":"")},rec.html));
     wrap.appendChild(el("button",{class:"btn sm ghost",style:"margin-top:10px","data-act":"addSet","data-ei":String(ei)},"＋ 세트 추가"));
@@ -1070,7 +1084,40 @@ var APP_VERSION="v1.5";
 /* ============================================================
    렌더: 기록 (History)
    ============================================================ */
-  var histTab="sessions";
+  var histTab="sessions",histWeekOffset=0,histSelectedDate=null,histBodyPart="전체";
+  function openSessionEditor(id){
+    var original=sessions.find(function(s){return s.id===id;});
+    if(!original||original.date!==todayISO()){toast("오늘 완료한 기록만 수정할 수 있어요");return;}
+    var draft=JSON.parse(JSON.stringify(original)),baseline=JSON.stringify(draft);
+    function cancel(){if(JSON.stringify(draft)===baseline||confirm("수정한 내용을 취소할까요?"))closeSheet();}
+    function draw(){
+      var content=draft.entries.map(function(en,ei){
+        return '<section class="card"><h3>'+esc(en.exercise)+'</h3><div class="btn-row"><label>단위 <select data-e="'+ei+'" data-field="unit"><option'+(en.unit==='kg'?' selected':'')+'>kg</option><option'+(en.unit==='lb'?' selected':'')+'>lb</option></select></label><label>계산 <select data-e="'+ei+'" data-field="mode"><option value="weight"'+(!isAssist(en)?' selected':'')+'>일반</option><option value="assist"'+(isAssist(en)?' selected':'')+'>어시스트</option></select></label></div>'+en.sets.map(function(st,si){
+          return '<div style="margin:12px 0"><div style="display:flex;justify-content:space-between;align-items:center"><b>'+(si+1)+'세트</b><button type="button" class="btn sm danger" data-remove="'+ei+','+si+'">삭제</button></div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">'+[['weight','중량',0,'any'],['reps','횟수',1,1],['rpe','RPE',6,0.5]].map(function(f){return '<label style="font-size:12px">'+f[1]+'<input style="width:100%;min-width:0" type="number" inputmode="decimal" min="'+f[2]+'" step="'+f[3]+'" '+(f[0]==='rpe'?'max="10"':'required')+' data-e="'+ei+'" data-s="'+si+'" data-field="'+f[0]+'" value="'+esc(st[f[0]]==null?'':String(st[f[0]]))+'"></label>';}).join('')+'</div></div>';
+        }).join('')+'<button type="button" class="btn sm ghost" data-add="'+ei+'">＋ 세트 추가</button><label style="display:block;margin-top:12px">메모<textarea style="width:100%;margin-top:4px" rows="2" data-e="'+ei+'" data-field="memo">'+esc(en.memo||'')+'</textarea></label></section>';
+      }).join('');
+      openSheet('<h3>오늘 운동 기록 수정</h3><p class="sub">'+esc(draft.date)+' · 단위를 바꾸면 입력 숫자는 그대로 유지돼요.</p><form id="sessionEditForm">'+content+'<div class="btn-row"><button type="button" class="btn ghost" id="editCancel">취소</button><button type="submit" class="btn primary">저장</button></div></form>');
+      scrimClose=cancel;
+      var form=$("#sessionEditForm");
+      $$(form,'[data-field="rpe"]').forEach(function(input){var grid=input.parentElement.parentElement;grid.removeAttribute('style');grid.classList.add('record-edit-grid');if(settings.rpeEnabled===false){input.disabled=true;grid.classList.add('no-rpe');}});
+      function update(e){var t=e.target,f=t.getAttribute('data-field');if(!f)return;var en=draft.entries[+t.getAttribute('data-e')],si=t.getAttribute('data-s');if(si===null)en[f]=t.value;else en.sets[+si][f]=t.value===''?null:+t.value;}
+      form.oninput=update;form.onchange=update;
+      $$(form,'[data-remove]').forEach(function(b){b.onclick=function(){var p=b.getAttribute('data-remove').split(',').map(Number),sets=draft.entries[p[0]].sets;if(sets.length===1){toast('종목마다 한 세트 이상 남겨 주세요');return;}sets.splice(p[1],1);draw();};});
+      $$(form,'[data-add]').forEach(function(b){b.onclick=function(){draft.entries[+b.getAttribute('data-add')].sets.push({weight:null,reps:null,rpe:null,done:true});draw();};});
+      $("#editCancel").onclick=cancel;
+      form.onsubmit=function(e){e.preventDefault();
+        var valid=draft.entries.every(function(en){return en.sets.length&&en.sets.every(function(st){return st.weight!==null&&Number.isFinite(+st.weight)&&(+st.weight>0||(isAssist(en)&&+st.weight===0))&&Number.isInteger(+st.reps)&&+st.reps>0&&(st.rpe==null||(Number.isFinite(+st.rpe)&&+st.rpe>=6&&+st.rpe<=10));});});
+        if(!valid){toast('중량·횟수·RPE를 확인해 주세요. 일반 중량은 0보다 커야 해요.');return;}
+        var idx=sessions.findIndex(function(s){return s.id===id;});
+        if(idx<0||draft.date!==todayISO()){toast('수정할 오늘 기록을 찾을 수 없어요');return;}
+        draft.totalVolume=0;draft.entries.forEach(function(en){en.sets.forEach(function(st){st.done=true;draft.totalVolume+=setKg(en,st)*(+st.reps);});});
+        var next=sessions.slice();next[idx]=draft;
+        try{localStorage.setItem(K.sessions,JSON.stringify(next));}catch(err){toast('저장 공간 오류: 수정 내용을 저장하지 못했어요');return;}
+        sessions=next;recomputeBests();closeSheet();renderToday();toast('운동 기록을 수정했어요');
+      };
+    }
+    draw();
+  }
   function renderHistory(){
     var v=$("#view-history");v.innerHTML="";
     v.appendChild(el("div",{class:"subtabs"},
@@ -1081,9 +1128,22 @@ var APP_VERSION="v1.5";
   }
 
   function renderSessionsList(v){
-    if(!sessions.length){v.appendChild(emptyCard("📖","아직 기록이 없습니다","운동을 완료하면 여기에 쌓입니다"));return;}
-    for(var i=sessions.length-1;i>=0;i--){
-      var s=sessions[i];
+    var bounds=weekBounds(histWeekOffset);
+    var nav=el("div",{class:"card"},'<div class="calnav"><button class="icon-btn" id="histPrev" aria-label="이전 주">‹</button><b>'+bounds.startISO+' ~ '+bounds.endISO.slice(5)+'</b><button class="icon-btn" id="histNext" aria-label="다음 주">›</button></div><div class="btn-row"><button class="btn sm ghost" id="histNow">이번 주</button><button class="btn sm ghost" id="histCal">달력에서 선택</button>'+(histSelectedDate?'<button class="btn sm ghost" id="histAllWeek">주 전체 보기</button>':'')+'</div>'+(histSelectedDate?'<p class="muted">'+histSelectedDate+' 기록</p>':''));
+    v.appendChild(nav);
+    $("#histPrev",nav).onclick=function(){histWeekOffset--;histSelectedDate=null;renderHistory();};
+    $("#histNext",nav).onclick=function(){histWeekOffset++;histSelectedDate=null;renderHistory();};
+    $("#histNow",nav).onclick=function(){histWeekOffset=0;histSelectedDate=null;renderHistory();};
+    if(histSelectedDate)$("#histAllWeek",nav).onclick=function(){histSelectedDate=null;renderHistory();};
+    $("#histCal",nav).onclick=function(){openCalendarSheet(function(iso){
+      var base=weekBounds(0).startISO;
+      histWeekOffset=Math.floor((Date.parse(iso+'T12:00:00Z')-Date.parse(base+'T12:00:00Z'))/604800000);
+      histSelectedDate=iso;closeSheet();renderHistory();
+    },histSelectedDate||bounds.startISO);};
+    var shown=sessions.filter(function(s){return s.date>=bounds.startISO&&s.date<=bounds.endISO&&(!histSelectedDate||s.date===histSelectedDate);}).slice().sort(function(a,b){return b.date.localeCompare(a.date)||(b.endTs||0)-(a.endTs||0);});
+    if(!shown.length){v.appendChild(emptyCard("📖","이 기간에는 기록이 없습니다","다른 주 또는 달력의 날짜를 선택하세요"));return;}
+    for(var i=0;i<shown.length;i++){
+      var s=shown[i];
       var h=Math.floor(s.durationSec/3600),m=Math.floor(s.durationSec%3600/60);
       var dur=(h>0?h+"시간 ":"")+m+"분";
       var lis=s.entries.map(function(en){
@@ -1101,10 +1161,13 @@ var APP_VERSION="v1.5";
   }
 
   function renderByExercise(v){
+    var filters=el("div",{class:"catrow"},["전체"].concat(BODY_PARTS).map(function(p){return '<button class="catchip'+(histBodyPart===p?' on':'')+'" data-part="'+esc(p)+'">'+esc(p)+'</button>';}).join(''));
+    v.appendChild(filters);
+    $$(filters,"[data-part]").forEach(function(b){b.onclick=function(){histBodyPart=b.getAttribute("data-part");renderHistory();};});
     var names={};
-    sessions.forEach(function(s){s.entries.forEach(function(en){(names[en.exercise]=names[en.exercise]||[]).push({date:s.date,en:en});});});
+    sessions.forEach(function(s){s.entries.forEach(function(en){if(histBodyPart!=="전체"&&(en.bodyPart||bodyPartFor(en.exercise))!==histBodyPart)return;(names[en.exercise]=names[en.exercise]||[]).push({date:s.date,en:en});});});
     var keys=Object.keys(names);
-    if(!keys.length){v.appendChild(emptyCard("📖","아직 기록이 없습니다","운동을 완료하면 종목별로 정리됩니다"));return;}
+    if(!keys.length){v.appendChild(emptyCard("📖","해당 부위의 기록이 없습니다","다른 부위를 선택해 보세요"));return;}
     keys.sort(function(a,b){return names[b].slice(-1)[0].date.localeCompare(names[a].slice(-1)[0].date);});
     keys.forEach(function(name){
       var hist=names[name];var exo=findEx(name);
@@ -1118,6 +1181,7 @@ var APP_VERSION="v1.5";
         (exo&&exo.best1RM?' · 추정 1RM '+fmt(fromKg(exo.best1RM,settings.unit))+settings.unit:'')+'</div>'+
         sparkline(series));
       v.appendChild(card);
+      card.style.cursor="pointer";card.onclick=function(){openExerciseHistory(name);};
     });
   }
 
@@ -1157,7 +1221,7 @@ var APP_VERSION="v1.5";
         var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(i+1)+'</span>'+
           '<span class="hcell"><b class="hn">'+fmt(st.weight)+'</b><span class="u">'+esc(h.en.unit)+'</span></span>'+
           '<span class="hcell"><b class="hn">'+st.reps+'</b><span class="u">회</span></span>'+
-          '<span class="hset-rpe">'+(st.rpe!=null?'RPE '+st.rpe:'')+'</span></div>';}).join('');
+          '<span class="hset-rpe">'+(settings.rpeEnabled!==false&&st.rpe!=null?'RPE '+st.rpe:'')+'</span></div>';}).join('');
         var memo=h.en.memo?'<div class="hmemo">📝 '+esc(h.en.memo)+'</div>':'';
         return '<div class="hcard"><div class="faint" style="font-size:12px">'+esc(koDate(h.date))+' · '+daysAgoLabel(h.date)+'</div>'+
           '<div class="hvol">볼륨 <b>'+fmt(fromKg(vol,settings.unit))+'kg</b></div>'+
@@ -1554,8 +1618,9 @@ var APP_VERSION="v1.5";
       rows+='<div class="dd-row"><span>'+esc(en.exercise)+' <span class="faint" style="font-size:11px">'+esc(en.bodyPart)+'</span></span><span class="mono faint">'+en.sets.length+'세트 · '+fmt(fromKg(ev,settings.unit))+settings.unit+'</span></div>';});});
     return '<div class="daydetail"><div class="dd-head">'+iso.slice(5).replace("-","/")+' · <b>'+fmt(fromKg(total,settings.unit))+settings.unit+'</b> · '+Math.round(dur/60)+'분</div>'+rows+'</div>';
   }
-  function openCalendarSheet(){
-    var now=new Date(todayISO()+"T00:00:00"),calY=now.getFullYear(),calM=now.getMonth(),selIso=null;
+  function openCalendarSheet(onSelect,initialIso){
+    if(typeof onSelect!=="function")onSelect=null;
+    var now=new Date((initialIso||todayISO())+"T00:00:00"),calY=now.getFullYear(),calM=now.getMonth(),selIso=initialIso||null;
     var workoutSet={};sessions.forEach(function(s){workoutSet[s.date]=true;});
     function p2(n){return n<10?"0"+n:""+n;}
     function render(){
@@ -1571,7 +1636,7 @@ var APP_VERSION="v1.5";
         '<button class="btn primary block" id="calClose" style="margin-top:14px">닫기</button>');
       $("#cPrev").onclick=function(){calM--;if(calM<0){calM=11;calY--;}selIso=null;render();};
       $("#cNext").onclick=function(){calM++;if(calM>11){calM=0;calY++;}selIso=null;render();};
-      $$($("#sheet"),".cal-cell[data-iso]").forEach(function(c){c.onclick=function(){var iso=c.getAttribute("data-iso");if(workoutSet[iso]){selIso=(selIso===iso?null:iso);render();}};});
+      $$($("#sheet"),".cal-cell[data-iso]").forEach(function(c){c.onclick=function(){var iso=c.getAttribute("data-iso");if(onSelect){onSelect(iso);return;}if(workoutSet[iso]){selIso=(selIso===iso?null:iso);render();}};});
       $("#calClose").onclick=closeSheet;
     }
     render();
@@ -1712,11 +1777,14 @@ var APP_VERSION="v1.5";
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 2px 14px">'+
         '<label class="fl" style="margin:0">내 체중 (kg) <span class="faint" style="font-weight:400">· 칼로리 추정용</span></label>'+
         '<input id="mBw" class="num" inputmode="decimal" style="width:96px" value="'+(settings.bodyweightKg||70)+'"></div>'+
+      '<label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 2px"><span>RPE 사용</span><input type="checkbox" id="mRpe" style="width:22px;height:22px;accent-color:var(--accent)"'+(settings.rpeEnabled!==false?' checked':'')+'></label>'+
+      '<p class="faint" style="font-size:12px;margin-bottom:18px">끄면 RPE 입력을 숨기고 무게·횟수로 추천을 계산해요. 기존 RPE 기록은 보관돼요.</p>'+
       '<button class="btn block" id="mExport" style="margin-bottom:10px">⬇︎ 데이터 백업 내보내기 (JSON)</button>'+
       '<button class="btn block" id="mImport" style="margin-bottom:10px">⬆︎ 백업 불러오기</button>'+
       '<button class="btn block ghost" id="mInfo" style="margin-bottom:10px">추천 방식 설명 (RPE·1RM)</button>'+
       '<div class="faint" style="font-size:12px;margin-top:8px;line-height:1.5">기록은 이 브라우저에만 저장됩니다. 기기를 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 백업하세요.</div>');
     $("#mBw").onchange=function(){var v=parseFloat(this.value);if(v>0){settings.bodyweightKg=v;save(K.settings,settings);toast("체중 저장됨");}};
+    $("#mRpe").onchange=function(){settings.rpeEnabled=this.checked;save(K.settings,settings);recomputeBests();renderToday();renderHistory();renderReport();renderRecovery();toast(settings.rpeEnabled?'RPE 사용 켜짐':'RPE 사용 꺼짐');};
     $("#mExport").onclick=exportJSON;
     $("#mImport").onclick=function(){$("#importFile").click();};
     $("#mInfo").onclick=openInfo;
