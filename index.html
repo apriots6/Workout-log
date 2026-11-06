@@ -133,9 +133,6 @@
   .set-kind{border:1px solid var(--line);background:var(--card);border-radius:6px;min-width:28px;min-height:32px;padding:2px;color:var(--ink);font:inherit;cursor:pointer}
   .set-kind.on{background:var(--accent);color:white;border-color:var(--accent)}
   .setgrid.no-rir{grid-template-columns:56px 1fr 12px 1fr 26px}
-  .record-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-  .record-edit-grid.no-rir{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .record-edit-grid.no-rir label:last-child{display:none}
   .setgrid.done{background:var(--good-soft)}
   .setgrid .idx{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
   .setgrid .idx .setchk{width:20px;height:20px;margin:0;accent-color:var(--good);flex:none}
@@ -320,7 +317,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.7";
+var APP_VERSION="v1.7.1";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -1124,14 +1121,44 @@ var APP_VERSION="v1.7";
     function cancel(){if(JSON.stringify(draft)===baseline||confirm("수정한 내용을 취소할까요?"))closeSheet();}
     function draw(){
       var content=draft.entries.map(function(en,ei){
-        return '<section class="card"><h3>'+esc(en.exercise)+'</h3><div class="btn-row"><label>단위 <select data-e="'+ei+'" data-field="unit"><option'+(en.unit==='kg'?' selected':'')+'>kg</option><option'+(en.unit==='lb'?' selected':'')+'>lb</option></select></label><label>계산 <select data-e="'+ei+'" data-field="mode"><option value="weight"'+(!isAssist(en)?' selected':'')+'>일반</option><option value="assist"'+(isAssist(en)?' selected':'')+'>어시스트</option></select></label></div>'+en.sets.map(function(st,si){
-          return '<div style="margin:12px 0"><div style="display:flex;justify-content:space-between;align-items:center"><button type="button" class="set-kind'+(st.warmup?' on':'')+'" data-warmup="'+ei+','+si+'" aria-pressed="'+!!st.warmup+'" aria-label="'+(si+1)+'세트 웜업 표시">'+(st.warmup?'W · 웜업':(si+1)+'세트')+'</button><button type="button" class="btn sm danger" data-remove="'+ei+','+si+'">삭제</button></div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">'+[['weight','중량',0,'any'],['reps','횟수',1,1],['rir','RIR',0,0.5]].map(function(f){return '<label style="font-size:12px">'+f[1]+'<input style="width:100%;min-width:0" type="number" inputmode="decimal" min="'+f[2]+'" step="'+f[3]+'" '+(f[0]==='rir'?'max="10"':'required')+' data-e="'+ei+'" data-s="'+si+'" data-field="'+f[0]+'" value="'+esc(st[f[0]]==null?'':String(st[f[0]]))+'"></label>';}).join('')+'</div></div>';
-        }).join('')+'<button type="button" class="btn sm ghost" data-add="'+ei+'">＋ 세트 추가</button><label style="display:block;margin-top:12px">메모<textarea style="width:100%;margin-top:4px" rows="2" data-e="'+ei+'" data-field="memo">'+esc(en.memo||'')+'</textarea></label></section>';
+        // 운동 화면과 동일한 카드 렌더러를 사용한다. 편집 이벤트는 사본에만 연결한다.
+        var card=renderEntry(en,ei);
+        $$(card,'.drag-handle, [data-act="rmEntry"], .lastrec, .rec').forEach(function(node){node.remove();});
+        $$(card,'button').forEach(function(b){b.type='button';});
+        $$(card,'input[data-f]').forEach(function(input){
+          var field=input.getAttribute('data-f');
+          input.setAttribute('data-field',field);input.setAttribute('data-e',ei);
+          input.setAttribute('data-s',input.getAttribute('data-si'));
+          input.setAttribute('aria-label',(+(input.getAttribute('data-si'))+1)+'세트 '+(field==='weight'?'중량':field==='reps'?'횟수':'RIR'));
+          input.type='number';input.min=field==='reps'?'1':'0';
+          input.step=field==='reps'?'1':field==='rir'?'0.5':'any';
+          if(field==='rir')input.max='10';else input.required=true;
+        });
+        var memo=card.querySelector('[data-memo]');
+        memo.setAttribute('data-field','memo');memo.setAttribute('data-e',ei);memo.setAttribute('aria-label','메모');
+        $$(card,'input[data-chk]').forEach(function(input){
+          input.checked=true;input.setAttribute('checked','');input.disabled=true;input.title='완료한 세트';
+          input.closest('.setgrid').classList.add('done');
+        });
+        $$(card,'[data-act]').forEach(function(b){
+          var act=b.getAttribute('data-act'),si=b.getAttribute('data-si');
+          if(act==='warmup')b.setAttribute('data-warmup',ei+','+si);
+          else if(act==='rmSet')b.setAttribute('data-remove',ei+','+si);
+          else if(act==='addSet')b.setAttribute('data-add',ei);
+          else if(act==='setUnit'||act==='setMode'){
+            b.setAttribute('data-edit-entry',ei);
+            b.setAttribute('data-edit-field',act==='setUnit'?'unit':'mode');
+            b.setAttribute('data-edit-value',b.getAttribute(act==='setUnit'?'data-u':'data-m'));
+          }
+        });
+        return card.outerHTML;
       }).join('');
       openSheet('<h3>운동 기록 수정</h3><p class="sub">'+esc(draft.date)+' · 단위를 바꾸면 입력 숫자는 그대로 유지돼요.</p><form id="sessionEditForm">'+content+'<div class="btn-row"><button type="button" class="btn ghost" id="editCancel">취소</button><button type="submit" class="btn primary">저장</button></div></form>');
       scrimClose=cancel;
       var form=$("#sessionEditForm");
-      $$(form,'[data-field="rir"]').forEach(function(input){var grid=input.parentElement.parentElement;grid.removeAttribute('style');grid.classList.add('record-edit-grid');if(settings.rirEnabled===false){input.disabled=true;grid.classList.add('no-rir');}});
+      $$(form,'[data-edit-entry]').forEach(function(b){b.onclick=function(){
+        draft.entries[+b.getAttribute('data-edit-entry')][b.getAttribute('data-edit-field')]=b.getAttribute('data-edit-value');draw();
+      };});
       function update(e){var t=e.target,f=t.getAttribute('data-field');if(!f)return;var en=draft.entries[+t.getAttribute('data-e')],si=t.getAttribute('data-s');if(si===null)en[f]=t.value;else {en.sets[+si][f]=t.value===''?null:+t.value;if(f==='rir')delete en.sets[+si].rirFromLegacy;}}
       form.oninput=update;form.onchange=update;
       $$(form,'[data-warmup]').forEach(function(b){b.onclick=function(){var p=b.getAttribute('data-warmup').split(',').map(Number),st=draft.entries[p[0]].sets[p[1]];st.warmup=!st.warmup;draw();};});
