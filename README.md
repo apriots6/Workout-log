@@ -31,7 +31,7 @@ cd ~/Applications/'workout log' && python3 -m http.server 8091
 - iOS는 로컬 `file://` 앱에 영구 저장을 못 하므로 호스팅이 필요.
 
 ### 버전 확인 (업데이트 반영 체크)
-- `<script>` 최상단의 `var APP_VERSION="v1.7.1";` 상수. 헤더 "Training Log" 옆 배지로 표시된다.
+- `<script>` 최상단의 `var APP_VERSION="v1.7.2";` 상수. 헤더 "Training Log" 옆 배지로 표시된다.
 - **배포할 때마다 이 값을 올릴 것**(v1.1 → v1.2 …). 아이폰에서 배지 번호가 바뀌면 업데이트가 반영된 것.
 
 ---
@@ -55,7 +55,7 @@ tl.active    → 진행 중 세션 1개(없으면 null). 새로고침 복구용.
   routineId?, routineName?,           // 루틴에서 시작한 경우만
   entries:[
     { exercise, bodyPart, unit("kg"|"lb"), mode("weight"|"assist"), memo,
-      sets:[ { weight, reps, rir(null 가능), warmup(boolean), done, rpe?(기존 원본), rirFromLegacy? } ] }
+      sets:[ { weight, reps, rir(null 가능), warmup(boolean), dropSet(boolean), done, rpe?(기존 원본), rirFromLegacy? } ] }
   ],
   totalVolume }
 ```
@@ -140,7 +140,7 @@ tl.active    → 진행 중 세션 1개(없으면 null). 새로고침 복구용.
 v1.7 검증: 기존 RPE 원본·RIR 0 보존, 환산 재실행 안전성, 기존 off 설정 유지, 웜업 e1RM 제외를 코드로 확인. 브라우저에서 W/RIR 입력·재접속·운동 종료 후 보존, 홈 편집 버튼 위치와 수정 저장, 웜업 볼륨 집계 확인. 콘솔 오류 없음.
 
 ### 웜업 표시 (v1.7)
-- 운동 중 세트 번호 버튼 또는 완료 기록 편집의 세트 버튼을 누르면 **W**와 본세트를 전환한다. `st.warmup`에 저장하고 직전 세트 프리필에도 보존한다.
+- v1.7.2: 운동 중 또는 완료 기록 편집의 세트 번호를 누르면 **일반 → W(웜업) → D(드롭세트) → 일반** 순서로 전환한다. 공통 `cycleSetKind`가 `warmup`/`dropSet`을 상호 배타적으로 설정한다. 기존 W 기록과 호환하며, 완료 기록·백업·직전 세트 프리필에도 D 표시를 보존한다. 종목별 이전 기록에서도 W/D를 표시한다. 드롭세트는 표시만 추가하며 기존 일반 세트의 볼륨·추천 계산을 그대로 따른다.
 - 완료한 W 세트는 볼륨과 회복 계산에 포함한다. `estimateSet1RM`은 W에 대해 0을 반환해 최고기록·주간 PR 집계에서 제외한다. 다음 세트 추천은 본세트를 우선하며 W만 있으면 기존 최고기록을 참고하고, 기존 본세트 기록도 없으면 본세트 수행 후 추천한다.
 - 운동 중 입력을 즉시 저장하므로 W 전환이나 새로고침 시 입력값이 사라지지 않는다.
 

@@ -317,7 +317,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.7.1";
+var APP_VERSION="v1.7.2";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -474,6 +474,12 @@ var APP_VERSION="v1.7.1";
   function estimate1RM(weightKg,reps,rir){
     if(settings.rirEnabled!==false && rir!=null && Number.isFinite(+rir))reps+=Math.max(0,Math.min(10,+rir));
     return weightKg*(1+reps/30); // Epley 폴백
+  }
+  // 세트 유형: 일반 → 웜업 → 드롭세트 → 일반. 기존 warmup 기록과 호환.
+  function cycleSetKind(st){
+    if(st.warmup){st.warmup=false;st.dropSet=true;}
+    else if(st.dropSet){st.warmup=false;st.dropSet=false;}
+    else {st.warmup=true;st.dropSet=false;}
   }
   function estimateSet1RM(en,st){return st.warmup?0:estimate1RM(setKg(en,st),+st.reps,st.rir!=null?+st.rir:null);}
   // 추정 1RM과 무게로 "그 무게로 몇 회까지 가능한가"(실패 지점) 역산.
@@ -722,7 +728,7 @@ var APP_VERSION="v1.7.1";
     en.sets.forEach(function(st,si){
       var g=el("div",{class:"setgrid"+(st.done?" done":"")+(settings.rirEnabled===false?' no-rir':'')});
       g.innerHTML=
-        '<div class="idx"><button type="button" class="set-kind'+(st.warmup?' on':'')+'" data-act="warmup" data-ei="'+ei+'" data-si="'+si+'" aria-label="'+(si+1)+'세트 웜업 표시" aria-pressed="'+!!st.warmup+'">'+(st.warmup?'W':si+1)+'</button><input type="checkbox" class="setchk" data-chk="1" data-ei="'+ei+'" data-si="'+si+'"'+(st.done?" checked":"")+' title="세트 완료"></div>'+
+        '<div class="idx"><button type="button" class="set-kind'+(st.warmup||st.dropSet?' on':'')+'" data-act="warmup" data-ei="'+ei+'" data-si="'+si+'" aria-label="'+(si+1)+'세트 유형: '+(st.warmup?'웜업':st.dropSet?'드롭세트':'일반')+' · 누르면 변경">'+(st.warmup?'W':st.dropSet?'D':si+1)+'</button><input type="checkbox" class="setchk" data-chk="1" data-ei="'+ei+'" data-si="'+si+'"'+(st.done?" checked":"")+' title="세트 완료"></div>'+
         '<input class="num" inputmode="decimal" data-f="weight" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.weight===""||st.weight==null?"":st.weight)+'" placeholder="0">'+
         '<div class="x">×</div>'+
         '<input class="num" inputmode="numeric" data-f="reps" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.reps===""||st.reps==null?"":st.reps)+'" placeholder="0">'+
@@ -731,7 +737,7 @@ var APP_VERSION="v1.7.1";
       wrap.appendChild(g);
     });
     if(settings.rirEnabled!==false)wrap.appendChild(el("div",{class:"rir-note"},"RIR = 더 할 수 있었던 횟수 · 0~10회 · 비워도 됨"));
-    wrap.appendChild(el("div",{class:"faint",style:"font-size:11px;margin-top:4px"},"세트 번호를 누르면 W(웜업)로 표시돼요"));
+    wrap.appendChild(el("div",{class:"faint",style:"font-size:11px;margin-top:4px"},"세트 번호를 누르면 일반 → W(웜업) → D(드롭세트)로 바뀌어요"));
     var rec=recForEntry(en);
     if(rec)wrap.appendChild(el("div",{class:"rec"+(rec.pr?" pr":"")},rec.html));
     wrap.appendChild(el("button",{class:"btn sm ghost",style:"margin-top:10px","data-act":"addSet","data-ei":String(ei)},"＋ 세트 추가"));
@@ -803,7 +809,7 @@ var APP_VERSION="v1.7.1";
         en.unit=nu;persistActive();renderToday();}}
     else if(act==="setMode"){var en2=active.entries[ei];en2.mode=t.getAttribute("data-m");
         var ex2=findEx(en2.exercise);if(ex2){ex2.mode=en2.mode;save(K.exercises,exercises);}persistActive();renderToday();}
-    else if(act==="warmup"){var ws=active.entries[ei].sets[+t.getAttribute("data-si")];ws.warmup=!ws.warmup;persistActive();renderToday();}
+    else if(act==="warmup"){var ws=active.entries[ei].sets[+t.getAttribute("data-si")];cycleSetKind(ws);persistActive();renderToday();}
     else if(act==="addSet"){var last=active.entries[ei].sets.slice(-1)[0]||{weight:"",reps:"",rir:null};
       active.entries[ei].sets.push({weight:last.weight,reps:last.reps,rir:null});persistActive();renderToday();}
     else if(act==="rmSet"){var si=+t.getAttribute("data-si");active.entries[ei].sets.splice(si,1);
@@ -879,7 +885,7 @@ var APP_VERSION="v1.7.1";
       ex.mode=mode;
       var sets;
       if(le&&le.en.sets&&le.en.sets.length){         // 직전 기록의 세트를 그대로 프리필(세트별 무게·횟수 보존)
-        sets=le.en.sets.map(function(s){return {weight:s.weight,reps:s.reps,rir:null,warmup:!!s.warmup};});
+        sets=le.en.sets.map(function(s){return {weight:s.weight,reps:s.reps,rir:null,warmup:!!s.warmup,dropSet:!s.warmup&&!!s.dropSet};});
       }else{
         sets=[];var n=Math.max(1,it.targetSets||1);
         for(var i=0;i<n;i++)sets.push({weight:"",reps:(it.targetReps||""),rir:null});
@@ -1161,7 +1167,7 @@ var APP_VERSION="v1.7.1";
       };});
       function update(e){var t=e.target,f=t.getAttribute('data-field');if(!f)return;var en=draft.entries[+t.getAttribute('data-e')],si=t.getAttribute('data-s');if(si===null)en[f]=t.value;else {en.sets[+si][f]=t.value===''?null:+t.value;if(f==='rir')delete en.sets[+si].rirFromLegacy;}}
       form.oninput=update;form.onchange=update;
-      $$(form,'[data-warmup]').forEach(function(b){b.onclick=function(){var p=b.getAttribute('data-warmup').split(',').map(Number),st=draft.entries[p[0]].sets[p[1]];st.warmup=!st.warmup;draw();};});
+      $$(form,'[data-warmup]').forEach(function(b){b.onclick=function(){var p=b.getAttribute('data-warmup').split(',').map(Number),st=draft.entries[p[0]].sets[p[1]];cycleSetKind(st);draw();};});
       $$(form,'[data-remove]').forEach(function(b){b.onclick=function(){var p=b.getAttribute('data-remove').split(',').map(Number),sets=draft.entries[p[0]].sets;if(sets.length===1){toast('종목마다 한 세트 이상 남겨 주세요');return;}sets.splice(p[1],1);draw();};});
       $$(form,'[data-add]').forEach(function(b){b.onclick=function(){draft.entries[+b.getAttribute('data-add')].sets.push({weight:null,reps:null,rir:null,done:true});draw();};});
       $("#editCancel").onclick=cancel;
@@ -1278,7 +1284,7 @@ var APP_VERSION="v1.7.1";
     function recordsHTML(){
       return '<div class="hlist">'+hist.slice(0,3).map(function(h){   // 최근 3개 세션까지
         var vol=volE(h.en),e1=e1e(h.en),inten=e1>0?Math.round(maxW(h.en)/e1*100):0;
-        var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(st.warmup?'W':i+1)+'</span>'+
+        var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(st.warmup?'W':st.dropSet?'D':i+1)+'</span>'+
           '<span class="hcell"><b class="hn">'+fmt(st.weight)+'</b><span class="u">'+esc(h.en.unit)+'</span></span>'+
           '<span class="hcell"><b class="hn">'+st.reps+'</b><span class="u">회</span></span>'+
           '<span class="hset-rir">'+(settings.rirEnabled!==false&&st.rir!=null?'RIR '+st.rir+(st.rirFromLegacy?' (환산)':''):'')+'</span></div>';}).join('');
