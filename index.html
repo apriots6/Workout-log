@@ -125,6 +125,7 @@
   .hsets2{display:flex;flex-direction:column;gap:1px}
   .hset-row{display:grid;grid-template-columns:24px 1fr 1fr 52px;align-items:center;gap:6px;padding:8px 4px;border-top:1px solid var(--line-soft);font-family:var(--mono)}
   .hset-row .hset-i{color:var(--ink-faint);font-size:12px}
+  .hset-row .hset-i.drop-set{color:var(--danger);font-weight:700}
   .hcell{display:flex;align-items:baseline;gap:5px;min-width:0}
   .hcell .hn{min-width:2.6em;font-size:15px;font-weight:700}
   .hcell .u{font-size:12px;color:var(--ink-faint);font-weight:400}
@@ -132,6 +133,7 @@
   .setgrid{display:grid;grid-template-columns:56px 1fr 12px 1fr 1fr 26px;gap:6px;align-items:center;margin-bottom:6px;border-radius:8px}
   .set-kind{border:1px solid var(--line);background:var(--card);border-radius:6px;min-width:28px;min-height:32px;padding:2px;color:var(--ink);font:inherit;cursor:pointer}
   .set-kind.on{background:var(--accent);color:white;border-color:var(--accent)}
+  .set-kind.drop-set{background:var(--danger);color:white;border-color:var(--danger)}
   .setgrid.no-rir{grid-template-columns:56px 1fr 12px 1fr 26px}
   .setgrid.done{background:var(--good-soft)}
   .setgrid .idx{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
@@ -317,7 +319,7 @@
 "use strict";
 
 // 앱 버전 — 업데이트 반영 확인용. 새로 배포할 때마다 올린다.
-var APP_VERSION="v1.7.2";
+var APP_VERSION="v1.7.3";
 
 /* ============================================================
    상수 · 연구 근거 (RPE/RIR + Epley)
@@ -728,7 +730,7 @@ var APP_VERSION="v1.7.2";
     en.sets.forEach(function(st,si){
       var g=el("div",{class:"setgrid"+(st.done?" done":"")+(settings.rirEnabled===false?' no-rir':'')});
       g.innerHTML=
-        '<div class="idx"><button type="button" class="set-kind'+(st.warmup||st.dropSet?' on':'')+'" data-act="warmup" data-ei="'+ei+'" data-si="'+si+'" aria-label="'+(si+1)+'세트 유형: '+(st.warmup?'웜업':st.dropSet?'드롭세트':'일반')+' · 누르면 변경">'+(st.warmup?'W':st.dropSet?'D':si+1)+'</button><input type="checkbox" class="setchk" data-chk="1" data-ei="'+ei+'" data-si="'+si+'"'+(st.done?" checked":"")+' title="세트 완료"></div>'+
+        '<div class="idx"><button type="button" class="set-kind'+(st.warmup?' on':st.dropSet?' drop-set':'')+'" data-act="warmup" data-ei="'+ei+'" data-si="'+si+'" aria-label="'+(si+1)+'세트 유형: '+(st.warmup?'웜업':st.dropSet?'드롭세트':'일반')+' · 누르면 변경">'+(st.warmup?'W':st.dropSet?'D':si+1)+'</button><input type="checkbox" class="setchk" data-chk="1" data-ei="'+ei+'" data-si="'+si+'"'+(st.done?" checked":"")+' title="세트 완료"></div>'+
         '<input class="num" inputmode="decimal" data-f="weight" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.weight===""||st.weight==null?"":st.weight)+'" placeholder="0">'+
         '<div class="x">×</div>'+
         '<input class="num" inputmode="numeric" data-f="reps" data-ei="'+ei+'" data-si="'+si+'" value="'+(st.reps===""||st.reps==null?"":st.reps)+'" placeholder="0">'+
@@ -1284,7 +1286,7 @@ var APP_VERSION="v1.7.2";
     function recordsHTML(){
       return '<div class="hlist">'+hist.slice(0,3).map(function(h){   // 최근 3개 세션까지
         var vol=volE(h.en),e1=e1e(h.en),inten=e1>0?Math.round(maxW(h.en)/e1*100):0;
-        var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i">'+(st.warmup?'W':st.dropSet?'D':i+1)+'</span>'+
+        var rows=h.en.sets.map(function(st,i){return '<div class="hset-row"><span class="hset-i'+(!st.warmup&&st.dropSet?' drop-set':'')+'">'+(st.warmup?'W':st.dropSet?'D':i+1)+'</span>'+
           '<span class="hcell"><b class="hn">'+fmt(st.weight)+'</b><span class="u">'+esc(h.en.unit)+'</span></span>'+
           '<span class="hcell"><b class="hn">'+st.reps+'</b><span class="u">회</span></span>'+
           '<span class="hset-rir">'+(settings.rirEnabled!==false&&st.rir!=null?'RIR '+st.rir+(st.rirFromLegacy?' (환산)':''):'')+'</span></div>';}).join('');

@@ -31,7 +31,7 @@ cd ~/Applications/'workout log' && python3 -m http.server 8091
 - iOS는 로컬 `file://` 앱에 영구 저장을 못 하므로 호스팅이 필요.
 
 ### 버전 확인 (업데이트 반영 체크)
-- `<script>` 최상단의 `var APP_VERSION="v1.7.2";` 상수. 헤더 "Training Log" 옆 배지로 표시된다.
+- `<script>` 최상단의 `var APP_VERSION="v1.7.3";` 상수. 헤더 "Training Log" 옆 배지로 표시된다.
 - **배포할 때마다 이 값을 올릴 것**(v1.1 → v1.2 …). 아이폰에서 배지 번호가 바뀌면 업데이트가 반영된 것.
 
 ---
